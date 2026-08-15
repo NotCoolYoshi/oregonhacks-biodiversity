@@ -9,6 +9,7 @@
 // policies — not this.
 
 import { createClient } from '@supabase/supabase-js'
+import WebSocketTransport from 'ws'
 
 let client = null
 
@@ -43,6 +44,13 @@ export function getSupabase() {
 
   client = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // supabase-js builds a Realtime client in its constructor whether or not
+    // you subscribe to anything, and Realtime needs a WebSocket. Node 20 has
+    // no global WebSocket, so without an explicit transport createClient()
+    // throws before we ever reach PostgREST. We only use PostgREST — this is
+    // purely to get past that constructor. On Node >= 22 the `ws` dependency
+    // becomes unnecessary and this option can be dropped.
+    realtime: { transport: WebSocketTransport },
   })
 
   return client
