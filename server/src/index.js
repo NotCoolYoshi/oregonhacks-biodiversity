@@ -41,4 +41,5 @@ app.listen(PORT, () => {
       ? '[server] Pl@ntNet: live (PLANTNET_API_KEY set)'
       : '[server] Pl@ntNet: MOCK — no PLANTNET_API_KEY in server/.env, /api/identify returns fixtures',
   )
+  console.log('[server] iNaturalist: live (public read API, no key required)')
 })

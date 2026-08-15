@@ -1,14 +1,14 @@
 import { Router } from 'express'
 
-import {
-  IDENTIFY_RESULT,
-  SPECIES_STATUS,
-  UNKNOWN_STATUS,
-  PHENOLOGY_HISTOGRAM,
-  NEARBY_SPECIES,
-  placeName,
-} from '../mocks.js'
+import { IDENTIFY_RESULT, placeName } from '../mocks.js'
 import { identifyPlant, hasApiKey, PlantNetError } from '../services/plantnet.js'
+import {
+  resolveTaxonId,
+  getTaxonStatus,
+  getPhenology,
+  getNearbySpecies,
+  INaturalistError,
+} from '../services/inaturalist.js'
 
 const router = Router()
 
@@ -33,7 +33,7 @@ router.post('/identify', async (req, res, next) => {
   if (!hasApiKey()) {
     console.warn(
       '[identify] PLANTNET_API_KEY is not set — returning MOCK identification data. ' +
-        'Add a key from https://my.plantnet.org/ to server/.env for real results.',
+      'Add a key from https://my.plantnet.org/ to server/.env for real results.',
     )
     return res.json({ ...IDENTIFY_RESULT, source: 'mock' })
   }
@@ -50,81 +50,131 @@ router.post('/identify', async (req, res, next) => {
   }
 })
 
+/** Shared error handler for the three iNaturalist-backed routes below. */
+function handleINaturalistError(err, routeLabel, res, next) {
+  if (err instanceof INaturalistError) {
+    if (err.retryAfter) res.set('Retry-After', err.retryAfter)
+    console.warn(`[${routeLabel}] ${err.code}: ${err.message}`)
+    return res.status(err.status).json({ error: err.message, code: err.code })
+  }
+  next(err)
+}
+
 /**
- * GET /api/species/:taxonId/status?place_id=
+ * Resolve the taxon id for a status/phenology lookup.
+ *
+ * Pl@ntNet returns `inatTaxonId: null` on every real identification (it only
+ * gives us a GBIF id — see services/plantnet.js), so the client can't always
+ * put a numeric taxon id in the path. When it doesn't have one, it passes the
+ * literal segment `unknown` plus `?scientific_name=`, and we resolve the id
+ * here via a name search before continuing — one extra hop, not a redesign.
+ */
+async function resolveTaxonIdParam(req) {
+  const raw = req.params.taxonId
+  const numeric = Number(raw)
+  if (Number.isFinite(numeric) && numeric > 0) return numeric
+
+  const scientificName = String(req.query.scientific_name ?? '').trim()
+  if (!scientificName) {
+    throw new INaturalistError(
+      `taxonId must be numeric, or pass ?scientific_name= to resolve it (got "${raw}").`,
+      { status: 400, code: 'BAD_REQUEST' },
+    )
+  }
+  return resolveTaxonId(scientificName)
+}
+
+/**
+ * GET /api/species/:taxonId/status?place_id=&scientific_name=
  * Establishment means + conservation status for a taxon in a place.
  * `classification` is what the client uses to decide catch vs threat_report.
  */
-router.get('/species/:taxonId/status', (req, res) => {
-  // TODO: GET https://api.inaturalist.org/v1/taxa/${taxonId}?place_id=${placeId}
-  // and read `establishment_means` / `conservation_status` off the result.
-  const taxonId = Number(req.params.taxonId)
+router.get('/species/:taxonId/status', async (req, res, next) => {
   const placeId = Number(req.query.place_id) || DEFAULT_PLACE_ID
 
-  const status = SPECIES_STATUS[taxonId] ?? { ...UNKNOWN_STATUS, taxonId }
+  try {
+    const taxonId = await resolveTaxonIdParam(req)
+    const status = await getTaxonStatus(taxonId, placeId)
 
-  res.json({
-    ...status,
-    placeId,
-    placeName: placeName(placeId),
-    source: 'iNaturalist',
-  })
+    res.json({
+      ...status,
+      placeId,
+      placeName: placeName(placeId),
+      source: 'iNaturalist',
+    })
+  } catch (err) {
+    handleINaturalistError(err, 'species/status', res, next)
+  }
 })
 
 /**
- * GET /api/species/:taxonId/phenology?place_id=
+ * GET /api/species/:taxonId/phenology?place_id=&scientific_name=
  * Monthly observation histogram -> which months this species is typically seen.
  */
-router.get('/species/:taxonId/phenology', (req, res) => {
-  // TODO: GET https://api.inaturalist.org/v1/observations/histogram
-  //   ?taxon_id=${taxonId}&place_id=${placeId}&date_field=observed&interval=month_of_year
-  // and use `results.month_of_year` as the histogram.
-  const taxonId = Number(req.params.taxonId)
+router.get('/species/:taxonId/phenology', async (req, res, next) => {
   const placeId = Number(req.query.place_id) || DEFAULT_PLACE_ID
 
-  const histogram = PHENOLOGY_HISTOGRAM
-  const counts = Object.values(histogram)
-  const peak = Math.max(...counts)
-  const peakMonths = Object.entries(histogram)
-    .filter(([, count]) => count >= peak * 0.5)
-    .map(([month]) => Number(month))
+  try {
+    const taxonId = await resolveTaxonIdParam(req)
+    const histogram = await getPhenology(taxonId, placeId)
 
-  const currentMonth = new Date().getMonth() + 1
+    const counts = Object.values(histogram)
+    const peak = Math.max(...counts)
+    // A taxon with no observations here has an all-zero histogram; without this
+    // guard `count >= 0` marks all twelve months as peak and claims it's in
+    // season year-round.
+    const peakMonths =
+      peak === 0
+        ? []
+        : Object.entries(histogram)
+            .filter(([, count]) => count >= peak * 0.5)
+            .map(([month]) => Number(month))
 
-  res.json({
-    taxonId,
-    placeId,
-    placeName: placeName(placeId),
-    histogram,
-    peakMonths,
-    currentMonth,
-    inSeasonNow: peakMonths.includes(currentMonth),
-    totalObservations: counts.reduce((sum, n) => sum + n, 0),
-    source: 'iNaturalist',
-  })
+    const currentMonth = new Date().getMonth() + 1
+
+    res.json({
+      taxonId,
+      placeId,
+      placeName: placeName(placeId),
+      histogram,
+      peakMonths,
+      currentMonth,
+      inSeasonNow: peakMonths.includes(currentMonth),
+      totalObservations: counts.reduce((sum, n) => sum + n, 0),
+      source: 'iNaturalist',
+    })
+  } catch (err) {
+    handleINaturalistError(err, 'species/phenology', res, next)
+  }
 })
 
 /**
  * GET /api/region/:placeId/nearby?lat=&lng=&radius=&per_page=
  * Species recently observed near a place — the "catchable nearby" list.
  */
-router.get('/region/:placeId/nearby', (req, res) => {
-  // TODO: GET https://api.inaturalist.org/v1/observations/species_counts
-  //   ?place_id=${placeId}&iconic_taxa=Plantae&d1=<30 days ago>
-  // (or lat/lng/radius when the user has shared their location).
+router.get('/region/:placeId/nearby', async (req, res, next) => {
   const placeId = Number(req.params.placeId)
-  const perPage = Number(req.query.per_page) || 30
+  const radiusKm = Number(req.query.radius) || 25
 
-  const results = NEARBY_SPECIES.slice(0, perPage)
+  try {
+    const results = await getNearbySpecies(placeId, {
+      lat: req.query.lat != null ? Number(req.query.lat) : undefined,
+      lng: req.query.lng != null ? Number(req.query.lng) : undefined,
+      radius: radiusKm,
+      perPage: req.query.per_page,
+    })
 
-  res.json({
-    placeId,
-    placeName: placeName(placeId),
-    radiusKm: Number(req.query.radius) || 25,
-    totalResults: results.length,
-    results,
-    source: 'iNaturalist',
-  })
+    res.json({
+      placeId,
+      placeName: placeName(placeId),
+      radiusKm,
+      totalResults: results.length,
+      results,
+      source: 'iNaturalist',
+    })
+  } catch (err) {
+    handleINaturalistError(err, 'region/nearby', res, next)
+  }
 })
 
 /**

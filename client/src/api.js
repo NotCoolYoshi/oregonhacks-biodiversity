@@ -9,13 +9,27 @@ export const api = axios.create({
 /** POST /api/identify — { imageBase64 } -> candidate species matches. */
 export const identify = (body) => api.post('/api/identify', body).then((r) => r.data)
 
-/** GET /api/species/:taxonId/status — native / introduced / invasive for a place. */
-export const getSpeciesStatus = (taxonId, placeId) =>
-  api.get(`/api/species/${taxonId}/status`, { params: { place_id: placeId } }).then((r) => r.data)
+/**
+ * GET /api/species/:taxonId/status — native / introduced / invasive for a place.
+ *
+ * Pl@ntNet identifications come back with `inatTaxonId: null` (it only knows
+ * GBIF ids), so pass `scientificName` whenever `taxonId` is missing — the
+ * server resolves it against iNaturalist before looking up status.
+ */
+export const getSpeciesStatus = (taxonId, placeId, scientificName) =>
+  api
+    .get(`/api/species/${taxonId ?? 'unknown'}/status`, {
+      params: { place_id: placeId, scientific_name: taxonId ? undefined : scientificName },
+    })
+    .then((r) => r.data)
 
-/** GET /api/species/:taxonId/phenology — monthly observation histogram. */
-export const getSpeciesPhenology = (taxonId, placeId) =>
-  api.get(`/api/species/${taxonId}/phenology`, { params: { place_id: placeId } }).then((r) => r.data)
+/** GET /api/species/:taxonId/phenology — monthly observation histogram. Same fallback as above. */
+export const getSpeciesPhenology = (taxonId, placeId, scientificName) =>
+  api
+    .get(`/api/species/${taxonId ?? 'unknown'}/phenology`, {
+      params: { place_id: placeId, scientific_name: taxonId ? undefined : scientificName },
+    })
+    .then((r) => r.data)
 
 /** GET /api/region/:placeId/nearby — species recently observed near a place. */
 export const getNearby = (placeId, params) =>
