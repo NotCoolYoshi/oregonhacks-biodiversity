@@ -312,6 +312,56 @@ export async function getPhenology(taxonId, placeId) {
 }
 
 /**
+ * Establishment means for many taxa in one place, in a single request.
+ *
+ * `/taxa/:id` accepts comma-separated ids, so a page of species costs one call
+ * rather than one per species. Results are memoised per taxon, so a second
+ * caller asking about overlapping ids only pays for the ids it adds.
+ *
+ * Returns a Map of taxonId -> means. Ids iNaturalist has no checklist entry
+ * for come back as 'unknown', which is a real answer and not the same as
+ * 'native' — callers that treat it as native will overcount.
+ *
+ * @param {number[]} taxonIds
+ * @param {number} placeId
+ * @returns {Promise<Map<number, string>>}
+ */
+export async function getEstablishmentMeans(taxonIds, placeId) {
+  const unique = [...new Set((taxonIds ?? []).map(Number).filter(Boolean))]
+  const means = new Map()
+  if (unique.length === 0) return means
+
+  const missing = []
+  for (const id of unique) {
+    const hit = cache.get(`means:${id}:${placeId}`)
+    if (hit && hit.expiresAt > Date.now()) means.set(id, hit.value)
+    else missing.push(id)
+  }
+
+  if (missing.length > 0) {
+    // iNaturalist caps a multi-id lookup at 30 taxa per request.
+    for (let i = 0; i < missing.length; i += 30) {
+      const batch = missing.slice(i, i + 30)
+      const detail = await get(`/taxa/${batch.join(',')}`, { place_id: placeId })
+
+      for (const taxon of detail.results ?? []) {
+        const value = readEstablishmentMeans(taxon, placeId)
+        means.set(taxon.id, value)
+        cache.set(`means:${taxon.id}:${placeId}`, {
+          value,
+          expiresAt: Date.now() + CACHE_TTL_MS,
+        })
+      }
+    }
+  }
+
+  return means
+}
+
+/** True when iNaturalist positively records this taxon as belonging here. */
+export const isNativeMeans = (means) => NATIVE_MEANS.has(means)
+
+/**
  * Species recently observed in (or near) a place — the "catchable nearby" list.
  *
  * species_counts does not include establishment means, so we make one bulk
@@ -351,20 +401,12 @@ export async function getNearbySpecies(placeId, { lat, lng, radius, perPage } = 
 
   // One bulk lookup for establishment means across every taxon in the page.
   const ids = rows.map((row) => row.taxon?.id).filter(Boolean)
-  const meansById = new Map()
-
-  if (ids.length > 0) {
-    try {
-      const detail = await get(`/taxa/${ids.join(',')}`, { place_id: id })
-      for (const taxon of detail.results ?? []) {
-        meansById.set(taxon.id, readEstablishmentMeans(taxon, id))
-      }
-    } catch (err) {
-      // The nearby list is still useful without native/invasive badges, so a
-      // failure here degrades the response instead of failing the request.
-      console.warn(`[inaturalist] establishment means lookup failed: ${err.message}`)
-    }
-  }
+  // The nearby list is still useful without native/invasive badges, so a
+  // failure here degrades the response instead of failing the request.
+  const meansById = await getEstablishmentMeans(ids, id).catch((err) => {
+    console.warn(`[inaturalist] establishment means lookup failed: ${err.message}`)
+    return new Map()
+  })
 
   return rows.map((row) => {
     const taxon = row.taxon ?? {}

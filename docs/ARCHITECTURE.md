@@ -96,32 +96,54 @@ them from a loop.
 
 ### 3. Database — catches and users
 
-**TODO: pick one.** Nothing in the code commits to either yet; `POST
-/api/catches` and `GET /api/region/:placeId/score` are the only two routes that
-will touch it.
+**Supabase.** It was picked over Firebase for Postgres and real SQL, and the
+code commits to it — see `server/src/db/`: `schema.sql` for the table,
+`migrations/` for changes to it, and `supabaseClient.js` for the connection.
+`POST /api/catches` and `GET /api/region/:placeId/score` are the only two
+routes that touch it.
 
-| | Supabase | Firebase |
-|---|---|---|
-| Model | Postgres, real SQL | Document store |
-| Aggregation | `GROUP BY` — the region score is one query | Manual, or maintain counters |
-| Geo queries | PostGIS available | Needs workarounds |
-| Auth | Built in | Built in |
-| Image storage | Supabase Storage | Cloud Storage |
-| Setup cost | Slightly higher | Slightly lower |
+Nothing in the repo runs the SQL. There is no migration runner: `schema.sql`
+and each file in `migrations/` are pasted into the Supabase SQL editor by hand,
+in order.
 
-**Leaning Supabase**, because the region health score is fundamentally an
-aggregate query (count distinct native species, count distinct invasives, group
-by place) and that's a one-liner in SQL versus bookkeeping in Firestore. Decide
-before anyone writes persistence code.
+The server authenticates with the service role key, which bypasses Row Level
+Security but **not** table-level grants — hence the `grant` at the bottom of
+`schema.sql`. Missing it produces `42501: permission denied for table catches`,
+which reads like an RLS problem and is not one.
 
-Tables we'll need either way:
+What actually exists:
 
-- `users` — id, display name, home `place_id`
 - `catches` — id, user_id, taxon_id, scientific_name, common_name, type
-  (`catch` | `threat_report`), lat, lng, place_id, photo_url, confidence,
-  created_at
-- `species_cache` — taxon_id + place_id → establishment means, so we're not
-  re-querying iNaturalist for every catch
+  (`catch` | `threat_report`), lat, lng, place_id, place_name, photo_url,
+  confidence, created_at. Unique on (user_id, taxon_id, place_id), so the same
+  bush cannot be farmed for points.
+
+Not built:
+
+- `users` — there is no auth. The browser generates an id and keeps it in
+  localStorage (`client/src/session.js`); `user_id` on `catches` is that
+  string, unverified.
+- `species_cache` — establishment means is cached in memory instead, with a
+  10-minute TTL in `server/src/services/inaturalist.js`. A table would survive
+  restarts and is the better answer if lookups ever get hot.
+
+### Aggregating the region score
+
+`GET /api/region/:placeId/score` reads the rows for a place and aggregates them
+**in JavaScript**, not in SQL. PostgREST — the API in front of Supabase's
+Postgres — exposes no `GROUP BY` and no `COUNT(DISTINCT)`, so the "one query in
+SQL" argument for Postgres does not survive contact with the client library.
+Getting it back means a database view or an RPC, which is more DDL to apply by
+hand; at demo scale the JS pass is the cheaper trade. `SCAN_LIMIT` in
+`routes/api.js` caps the rows pulled — a region that outgrows it needs the view.
+
+Counting distinct *native* species needs one extra hop. The `catches` row
+records `type`, and `type` is `catch` both for species iNaturalist confirms are
+native and for species it has no checklist entry for at all (see `classify()`
+in `services/inaturalist.js`). Those two are not the same thing, so the score
+route re-reads establishment means for the distinct taxa it found — one bulk,
+cached call — rather than counting every catch as native. Persisting
+establishment means on the row would remove that hop; it is not stored today.
 
 ## Open questions
 

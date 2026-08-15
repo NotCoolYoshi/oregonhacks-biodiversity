@@ -7,6 +7,8 @@ import {
   getTaxonStatus,
   getPhenology,
   getNearbySpecies,
+  getEstablishmentMeans,
+  isNativeMeans,
   INaturalistError,
 } from '../services/inaturalist.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
@@ -453,8 +455,42 @@ router.get('/region/:placeId/score', async (req, res, next) => {
     const catches = rows.filter((row) => row.type === 'catch')
     const threats = rows.filter((row) => row.type === 'threat_report')
 
-    const uniqueNativeSpecies = new Set(catches.map((row) => row.taxon_id)).size
-    const uniqueInvasiveSpecies = new Set(threats.map((row) => row.taxon_id)).size
+    // `type` alone cannot answer "how many native species are here".
+    // classify() files a taxon as 'catch' both when iNaturalist confirms it is
+    // native AND when iNaturalist has no checklist entry for it at all — that
+    // default is correct for whether a capture counts, but counting the second
+    // group as native overstates the diversity of the region.
+    //
+    // Establishment means is not stored on the catches row, so we re-read it
+    // for the distinct taxa in this place: one bulk, ten-minute-cached call,
+    // not one per row. Persisting it on the row would remove this hop.
+    const caughtTaxa = [...new Set(catches.map((row) => row.taxon_id))]
+    const threatTaxa = new Set(threats.map((row) => row.taxon_id))
+
+    let meansByTaxon = new Map()
+    let meansAvailable = true
+    try {
+      meansByTaxon = await getEstablishmentMeans(caughtTaxa, placeId)
+    } catch (err) {
+      // The score is still worth serving without this. Fall back to the older,
+      // looser reading — every catch counts as native — and say so in the
+      // response rather than quietly reporting a different metric.
+      meansAvailable = false
+      console.warn(`[region/score] establishment means lookup failed: ${err.message}`)
+    }
+
+    const nativeTaxa = meansAvailable
+      ? caughtTaxa.filter((taxonId) => isNativeMeans(meansByTaxon.get(taxonId)))
+      : caughtTaxa
+
+    const uniqueNativeSpecies = nativeTaxa.length
+    // Caught, but iNaturalist has no establishment means for it here. Not
+    // native, not a threat — just unsurveyed, and reported separately so the
+    // number is visible rather than silently dropped.
+    const uniqueUnclassifiedSpecies = meansAvailable ? caughtTaxa.length - nativeTaxa.length : 0
+    // A threat_report is only ever assigned to a confirmed invasive, so this
+    // side needs no second look.
+    const uniqueInvasiveSpecies = threatTaxa.size
     const contributors = new Set(rows.map((row) => row.user_id)).size
 
     // Most-reported invasives first — the "what should we go pull up" list.
@@ -524,8 +560,13 @@ router.get('/region/:placeId/score', async (req, res, next) => {
         threatReports: threats.length,
         uniqueNativeSpecies,
         uniqueInvasiveSpecies,
+        // Additive: caught species iNaturalist has no establishment means for.
+        uniqueUnclassifiedSpecies,
         contributors,
       },
+      // False when the establishment means lookup failed and
+      // uniqueNativeSpecies has fallen back to counting every caught species.
+      speciesClassified: meansAvailable,
       topThreats,
       trend: {
         direction: delta7d > 0 ? 'up' : delta7d < 0 ? 'down' : 'flat',

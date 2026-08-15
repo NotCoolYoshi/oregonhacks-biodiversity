@@ -49,6 +49,17 @@ const TAXA = {
     observations_count: 11078,
     establishment_means: { establishment_means: 'native', place: { id: 10 } },
   },
+  // No establishment_means and no listed_taxa: iNaturalist has no checklist
+  // entry for this taxon here. classify() files it as a 'catch' (a species we
+  // cannot classify is not evidence of a threat), which is exactly the case
+  // that must NOT be counted as a native species.
+  42220: {
+    id: 42220,
+    name: 'Odocoileus hemionus',
+    preferred_common_name: 'Mule Deer',
+    rank: 'species',
+    observations_count: 15640,
+  },
   58732: {
     id: 58732,
     name: 'Cytisus scoparius',
@@ -81,10 +92,15 @@ const json = (body, status = 200) =>
 // Upstream stubs
 // ---------------------------------------------------------------------------
 
+// Flipped on to exercise the score route's degradation path when iNaturalist
+// cannot be reached.
+let failTaxaLookup = false
+
 function handleINaturalist(url) {
   // /v1/taxa/:id  (one or more comma-separated ids)
   const detail = url.pathname.match(/^\/v1\/taxa\/([\d,]+)$/)
   if (detail) {
+    if (failTaxaLookup) return json({ error: 'upstream is down' }, 500)
     const ids = detail[1].split(',').map(Number)
     const results = ids.map((id) => TAXA[id]).filter(Boolean)
     return json({ total_results: results.length, results })
@@ -351,6 +367,75 @@ check('observerActivity scaled to target', r.body.components.observerActivity ==
 check('score is the mean of the three components', r.body.score === 25, r.body.score)
 check('grade derived from score', r.body.grade === 'F', r.body.grade)
 check('source reports the database', r.body.source === 'supabase', r.body.source)
+check('all-native fixture reports nothing unclassified',
+  r.body.totals.uniqueUnclassifiedSpecies === 0, r.body.totals.uniqueUnclassifiedSpecies)
+check('classification succeeded', r.body.speciesClassified === true)
+
+// The bug this guards: classify() files a taxon iNaturalist has no checklist
+// entry for as a 'catch', which is right for whether the capture counts and
+// wrong for whether the species is native. Counting those as native inflated
+// uniqueNativeSpecies and, through it, nativeDiversity and the score.
+console.log('\n-- native count excludes unclassified species --')
+resetTable()
+
+seed('usr_1', 126887, 'catch') // confirmed native
+seed('usr_1', 48472, 'catch') // confirmed native
+seed('usr_2', 42220, 'catch') // NO establishment means — must not count as native
+seed('usr_2', 61317, 'threat_report') // confirmed invasive
+
+r = await getScore(10)
+check('only confirmed-native species count', r.body.totals.uniqueNativeSpecies === 2,
+  r.body.totals.uniqueNativeSpecies)
+check('unclassified species are reported separately',
+  r.body.totals.uniqueUnclassifiedSpecies === 1, r.body.totals.uniqueUnclassifiedSpecies)
+check('the unclassified species is still a catch', r.body.totals.catches === 3,
+  r.body.totals.catches)
+check('invasive count is unaffected', r.body.totals.uniqueInvasiveSpecies === 1,
+  r.body.totals.uniqueInvasiveSpecies)
+// nativeDiversity  = round(2/50*100)            = 4   (not 6 — that was the bug)
+// invasivePressure = round((1 - 1/(2+1)) * 100) = 67
+// observerActivity = round(2/15*100)            = 13
+check('nativeDiversity reflects only confirmed natives',
+  r.body.components.nativeDiversity === 4, r.body.components.nativeDiversity)
+check('invasivePressure denominator excludes unclassified',
+  r.body.components.invasivePressure === 67, r.body.components.invasivePressure)
+check('score follows the corrected components', r.body.score === 28, r.body.score)
+
+console.log('\n-- every catch unclassified --')
+resetTable()
+seed('usr_1', 42220, 'catch')
+seed('usr_2', 42220, 'catch')
+
+r = await getScore(10)
+check('no species counts as native', r.body.totals.uniqueNativeSpecies === 0,
+  r.body.totals.uniqueNativeSpecies)
+check('all of them count as unclassified', r.body.totals.uniqueUnclassifiedSpecies === 1,
+  r.body.totals.uniqueUnclassifiedSpecies)
+check('the catches themselves still count', r.body.totals.catches === 2, r.body.totals.catches)
+check('nativeDiversity is 0', r.body.components.nativeDiversity === 0,
+  r.body.components.nativeDiversity)
+check('invasivePressure is 0 with nothing classified either way',
+  r.body.components.invasivePressure === 0, r.body.components.invasivePressure)
+// observerActivity = round(2/15*100) = 13 -> score = round(13/3) = 4
+check('score falls to the observer component alone', r.body.score === 4, r.body.score)
+check('a region of unknowns is still graded, not N/A', r.body.grade === 'F', r.body.grade)
+
+console.log('\n-- iNaturalist unreachable during aggregation --')
+resetTable()
+// place 999 so the per-taxon means cache from earlier sections cannot serve it.
+seed('usr_1', 126887, 'catch', 999)
+seed('usr_2', 42220, 'catch', 999)
+failTaxaLookup = true
+r = await getScore(999)
+failTaxaLookup = false
+
+check('the score is still served', r.status === 200, r.status)
+check('degradation is declared, not hidden', r.body.speciesClassified === false,
+  r.body.speciesClassified)
+check('falls back to counting every caught species', r.body.totals.uniqueNativeSpecies === 2,
+  r.body.totals.uniqueNativeSpecies)
+check('no unclassified count is claimed when it could not be determined',
+  r.body.totals.uniqueUnclassifiedSpecies === 0, r.body.totals.uniqueUnclassifiedSpecies)
 
 console.log('\n-- region score, no data --')
 resetTable()
@@ -359,6 +444,10 @@ check('empty region scores 0', r.body.score === 0, r.body.score)
 check('empty region grades N/A rather than F', r.body.grade === 'N/A', r.body.grade)
 check('empty region reports zero totals',
   r.body.totals.catches === 0 && r.body.totals.contributors === 0)
+check('empty region reports zero unclassified',
+  r.body.totals.uniqueUnclassifiedSpecies === 0, r.body.totals.uniqueUnclassifiedSpecies)
+check('empty region needs no lookup to classify nothing',
+  r.body.speciesClassified === true, r.body.speciesClassified)
 check('empty region has no top threats', r.body.topThreats.length === 0)
 check('empty region trend is flat', r.body.trend.direction === 'flat', r.body.trend.direction)
 

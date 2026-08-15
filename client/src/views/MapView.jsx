@@ -7,7 +7,7 @@ const DEFAULT_ZOOM = 7
 
 export default function MapView() {
   // TODO: load catches (catch + threat_report) and plot them as markers,
-  // colored by kind. Invasive threat reports get a distinct marker layer.
+  // colored by type. Invasive threat reports get a distinct marker layer.
   return (
     <section>
       <h2>Map</h2>
