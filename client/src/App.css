@@ -29,3 +29,205 @@
 .main {
   padding-top: 1.5rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Photo capture flow
+   --------------------------------------------------------------------------- */
+
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: flex-start;
+  max-width: 34rem;
+}
+
+.capture button {
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 0.6rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.capture button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.capture button.capture-secondary {
+  background: transparent;
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
+.capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.capture-muted {
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.capture-detail {
+  font-style: italic;
+}
+
+.capture-note {
+  font-size: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+}
+
+/* Organ selector ---------------------------------------------------------- */
+
+.capture-organs {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem 1rem;
+  margin: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.capture-organs legend {
+  padding: 0 0.4rem;
+  color: var(--text-h);
+  font-size: 0.9rem;
+}
+
+.capture-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.capture-chips label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
+.capture-chips label.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.capture-chips input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* File input -------------------------------------------------------------- */
+
+.capture-file {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7rem 1.1rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-h);
+  font-size: 0.95rem;
+}
+
+.capture-file input {
+  display: none;
+}
+
+.capture-preview {
+  max-width: 100%;
+  max-height: 16rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+/* Candidate list ---------------------------------------------------------- */
+
+.capture-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.capture-candidates button {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.6rem;
+  text-align: left;
+  background: transparent;
+  color: var(--text-h);
+  border: 1px solid var(--border);
+}
+
+.capture-candidates button:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.capture-candidates img,
+.capture-thumb-placeholder {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: none;
+  background: var(--code-bg);
+}
+
+.capture-candidate-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.9rem;
+}
+
+/* Verdict panels ---------------------------------------------------------- */
+
+.capture-verdict {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.capture-verdict strong {
+  color: var(--text-h);
+}
+
+.capture-verdict.is-native {
+  border-color: rgba(34, 160, 90, 0.5);
+  background: rgba(34, 160, 90, 0.1);
+}
+
+.capture-verdict.is-threat {
+  border-color: rgba(214, 120, 20, 0.5);
+  background: rgba(214, 120, 20, 0.12);
+}
