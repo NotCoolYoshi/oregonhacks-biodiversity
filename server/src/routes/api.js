@@ -115,6 +115,14 @@ function toDatabaseError(error) {
       err.code = 'DB_CONSTRAINT'
       err.message = `The database rejected this row: ${error.message}`
       break
+    case '23505': // unique_violation
+      // POST /api/catches checks for a duplicate before inserting, so reaching
+      // this means two requests raced past that check. The unique index added
+      // in migration 002 is what actually makes the rule hold.
+      err.status = 409
+      err.code = 'DUPLICATE_CATCH'
+      err.message = 'You have already logged that species in this place.'
+      break
     default:
       err.status = 502
       err.code = 'DB_UNAVAILABLE'
@@ -326,16 +334,37 @@ router.post('/catches', async (req, res, next) => {
 
     const sb = getSupabase()
 
-    // "First catch" is per user per species, and drives the dex's new-entry
-    // celebration. Checked before the insert, or it would always be false.
+    // One query answers two questions, because both are about this user's
+    // history with this taxon:
+    //
+    //   isFirstCatch — has this user logged this species ANYWHERE before?
+    //                  Drives the dex's new-entry celebration, so it has to be
+    //                  read before the insert or it is always false.
+    //   duplicate    — has this user already logged it in THIS place? That is
+    //                  the same row twice, and it is how you farm points by
+    //                  photographing one blackberry bush repeatedly.
+    //
+    // The two differ deliberately: the same species in a new region is a real
+    // observation worth recording, just not a new dex entry.
     const { data: existing, error: existingError } = await sb
       .from('catches')
-      .select('id')
+      .select('id, place_id')
       .eq('user_id', userId)
       .eq('taxon_id', taxonId)
-      .limit(1)
 
     if (existingError) throw toDatabaseError(existingError)
+
+    const priorHere = existing?.find((row) => Number(row.place_id) === placeId)
+    if (priorHere) {
+      return res.status(409).json({
+        error:
+          `You have already logged ${status.scientificName} in ` +
+          `${placeName(placeId)}. Catch it somewhere else for another entry.`,
+        code: 'DUPLICATE_CATCH',
+        existingCatchId: priorHere.id,
+      })
+    }
+
     const isFirstCatch = (existing?.length ?? 0) === 0
 
     const location = body.location ?? {}

@@ -52,6 +52,21 @@ create index if not exists catches_user_id_idx on public.catches (user_id);
 create index if not exists catches_user_created_idx
   on public.catches (user_id, created_at desc);
 
+-- One catch per user, per species, per place — otherwise the same bush can be
+-- photographed repeatedly for points. POST /api/catches also checks this in
+-- application code to produce a friendly 409; the index is what settles the
+-- race between two concurrent requests.
+--
+-- Scoped to include place_id on purpose: the same species in a new region is
+-- still a real observation, just not a new dex entry.
+--
+-- (place_id is nullable, and Postgres treats NULLs as distinct in a unique
+-- index. The route always writes one, defaulting to Oregon, so this holds in
+-- practice — if place_id ever becomes genuinely optional, make it NOT NULL or
+-- add NULLS NOT DISTINCT.)
+create unique index if not exists catches_user_taxon_place_uniq
+  on public.catches (user_id, taxon_id, place_id);
+
 -- ---------------------------------------------------------------------------
 -- Row Level Security
 --
