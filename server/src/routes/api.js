@@ -8,6 +8,7 @@ import {
   NEARBY_SPECIES,
   placeName,
 } from '../mocks.js'
+import { identifyPlant, hasApiKey, PlantNetError } from '../services/plantnet.js'
 
 const router = Router()
 
@@ -17,17 +18,36 @@ const DEFAULT_PLACE_ID = 10 // iNaturalist place_id for Oregon
  * POST /api/identify
  * Body: { imageBase64 | imageUrl, organs?: string[], lat?, lng? }
  * Returns ranked candidate species for the photo.
+ *
+ * Real Pl@ntNet call when PLANTNET_API_KEY is set; mock data otherwise, so
+ * teammates without a key can still build the capture flow. `source` on the
+ * response says which one you got.
  */
-router.post('/identify', (req, res) => {
-  // TODO: POST the image to Pl@ntNet
-  // (https://my-api.plantnet.org/v2/identify/all?api-key=${process.env.PLANTNET_API_KEY})
-  // as multipart/form-data, then map each Pl@ntNet result onto the shape below.
-  // The Pl@ntNet key must never leave this process.
-  if (!req.body || (!req.body.imageBase64 && !req.body.imageUrl)) {
+router.post('/identify', async (req, res, next) => {
+  const body = req.body ?? {}
+
+  if (!body.imageBase64 && !body.imageUrl) {
     return res.status(400).json({ error: 'imageBase64 or imageUrl is required' })
   }
 
-  res.json(IDENTIFY_RESULT)
+  if (!hasApiKey()) {
+    console.warn(
+      '[identify] PLANTNET_API_KEY is not set — returning MOCK identification data. ' +
+        'Add a key from https://my.plantnet.org/ to server/.env for real results.',
+    )
+    return res.json({ ...IDENTIFY_RESULT, source: 'mock' })
+  }
+
+  try {
+    res.json(await identifyPlant(body))
+  } catch (err) {
+    if (err instanceof PlantNetError) {
+      if (err.retryAfter) res.set('Retry-After', err.retryAfter)
+      console.warn(`[identify] ${err.code}: ${err.message}`)
+      return res.status(err.status).json({ error: err.message, code: err.code })
+    }
+    next(err)
+  }
 })
 
 /**

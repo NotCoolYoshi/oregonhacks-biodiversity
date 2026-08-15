@@ -4,6 +4,7 @@ import express from 'express'
 import cors from 'cors'
 
 import apiRouter from './routes/api.js'
+import { hasApiKey } from './services/plantnet.js'
 
 const app = express()
 // 5001, not 5000: macOS AirPlay Receiver holds port 5000 by default.
@@ -35,4 +36,9 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`[server] listening on http://localhost:${PORT}`)
   console.log(`[server] CORS origins: ${allowedOrigins.join(', ')}`)
+  console.log(
+    hasApiKey()
+      ? '[server] Pl@ntNet: live (PLANTNET_API_KEY set)'
+      : '[server] Pl@ntNet: MOCK — no PLANTNET_API_KEY in server/.env, /api/identify returns fixtures',
+  )
 })
