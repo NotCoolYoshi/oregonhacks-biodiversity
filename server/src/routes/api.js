@@ -19,6 +19,27 @@ const DEFAULT_PLACE_ID = 10 // iNaturalist place_id for Oregon
 // action we actually want out of this app, and it is the less fun one.
 const POINTS = { catch: 10, threat_report: 25 }
 
+// Region score tuning. A region hits 100 on a component when it reaches the
+// target; these are demo-scale guesses, not ecology.
+const NATIVE_SPECIES_TARGET = 50
+const CONTRIBUTOR_TARGET = 15
+
+// Upper bound on rows pulled for one region's score. See the comment in
+// GET /region/:placeId/score — this is a guard rail, not pagination.
+const SCAN_LIMIT = 10_000
+
+const clampPercent = (n) => Math.max(0, Math.min(100, Math.round(n)))
+
+/** Standard US letter scale. The mock's 78 = 'B+' was fiction. */
+function gradeFor(score) {
+  const scale = [
+    [97, 'A+'], [93, 'A'], [90, 'A-'],
+    [87, 'B+'], [83, 'B'], [80, 'B-'],
+    [77, 'C+'], [73, 'C'], [70, 'C-'],
+    [67, 'D+'], [63, 'D'], [60, 'D-'],
+  ]
+  return scale.find(([min]) => score >= min)?.[1] ?? 'F'
+}
 
 /**
  * POST /api/identify
@@ -373,36 +394,120 @@ router.post('/catches', async (req, res, next) => {
  * GET /api/region/:placeId/score
  * Aggregates catches into a regional biodiversity health score (0-100).
  */
-router.get('/region/:placeId/score', (req, res) => {
-  // TODO: aggregate from the catches table — unique native species vs unique
-  // invasive species vs contributor count — instead of returning fixtures.
-  const placeId = Number(req.params.placeId)
+router.get('/region/:placeId/score', async (req, res, next) => {
+  if (!requireDatabase(res)) return
 
-  res.json({
-    placeId,
-    placeName: placeName(placeId),
-    score: 78,
-    grade: 'B+',
-    components: {
-      nativeDiversity: 84,
-      invasivePressure: 61,
-      observerActivity: 89,
-    },
-    totals: {
-      catches: 142,
-      threatReports: 23,
-      uniqueNativeSpecies: 38,
-      uniqueInvasiveSpecies: 7,
-      contributors: 12,
-    },
-    topThreats: [
-      { taxonId: 54566, commonName: 'Himalayan blackberry', reports: 11 },
-      { taxonId: 58732, commonName: 'Scotch broom', reports: 7 },
-      { taxonId: 49572, commonName: 'English holly', reports: 5 },
-    ],
-    trend: { direction: 'up', delta7d: 3 },
-    computedAt: new Date().toISOString(),
-  })
+  const placeId = Number(req.params.placeId)
+  if (!Number.isFinite(placeId) || placeId <= 0) {
+    return res
+      .status(400)
+      .json({ error: `placeId must be a positive number (got "${req.params.placeId}").`,
+        code: 'BAD_REQUEST' })
+  }
+
+  try {
+    const sb = getSupabase()
+
+    // Aggregated in JS rather than SQL. PostgREST has no COUNT(DISTINCT) or
+    // GROUP BY, and the alternative — a Postgres view or an RPC — is DDL that
+    // has to be applied by hand in the SQL editor, which is a worse trade at
+    // this size. SCAN_LIMIT is a guard rail, not a page: if a region ever
+    // exceeds it, this needs to become a view.
+    const { data: rows, error } = await sb
+      .from('catches')
+      .select('taxon_id, type, user_id, common_name, scientific_name, created_at')
+      .eq('place_id', placeId)
+      .limit(SCAN_LIMIT)
+
+    if (error) throw toDatabaseError(error)
+
+    const catches = rows.filter((row) => row.type === 'catch')
+    const threats = rows.filter((row) => row.type === 'threat_report')
+
+    const uniqueNativeSpecies = new Set(catches.map((row) => row.taxon_id)).size
+    const uniqueInvasiveSpecies = new Set(threats.map((row) => row.taxon_id)).size
+    const contributors = new Set(rows.map((row) => row.user_id)).size
+
+    // Most-reported invasives first — the "what should we go pull up" list.
+    const threatsByTaxon = new Map()
+    for (const row of threats) {
+      const entry = threatsByTaxon.get(row.taxon_id) ?? {
+        taxonId: row.taxon_id,
+        commonName: row.common_name ?? row.scientific_name,
+        reports: 0,
+      }
+      entry.reports += 1
+      threatsByTaxon.set(row.taxon_id, entry)
+    }
+    const topThreats = [...threatsByTaxon.values()]
+      .sort((a, b) => b.reports - a.reports)
+      .slice(0, 3)
+
+    const now = Date.now()
+    const since = (days) => now - days * 24 * 60 * 60 * 1000
+    const inWindow = (row, from, to) => {
+      const at = new Date(row.created_at).getTime()
+      return at >= from && at < to
+    }
+    const last7d = rows.filter((row) => inWindow(row, since(7), now)).length
+    const prior7d = rows.filter((row) => inWindow(row, since(14), since(7))).length
+    const delta7d = last7d - prior7d
+
+    const hasData = rows.length > 0
+
+    // Three components, averaged. Targets are what a healthy region looks like
+    // for a weekend hackathon demo, not ecology — tune them once there is real
+    // usage to calibrate against.
+    const nativeDiversity = hasData
+      ? clampPercent((uniqueNativeSpecies / NATIVE_SPECIES_TARGET) * 100)
+      : 0
+    // Inverted: 100 means nothing invasive has been reported here. It is
+    // averaged into the score alongside the other two, so higher must be
+    // better for all three or the arithmetic says the opposite of what it means.
+    const invasivePressure =
+      uniqueNativeSpecies + uniqueInvasiveSpecies > 0
+        ? clampPercent(
+            (1 - uniqueInvasiveSpecies / (uniqueNativeSpecies + uniqueInvasiveSpecies)) * 100,
+          )
+        : 0
+    const observerActivity = hasData
+      ? clampPercent((contributors / CONTRIBUTOR_TARGET) * 100)
+      : 0
+
+    const score = hasData
+      ? Math.round((nativeDiversity + invasivePressure + observerActivity) / 3)
+      : 0
+
+    res.json({
+      placeId,
+      placeName: placeName(placeId),
+      score,
+      // 'N/A' rather than 'F': an empty region has not scored badly, it has not
+      // been surveyed. The client should say so instead of grading it.
+      grade: hasData ? gradeFor(score) : 'N/A',
+      components: {
+        nativeDiversity,
+        invasivePressure,
+        observerActivity,
+      },
+      totals: {
+        catches: catches.length,
+        threatReports: threats.length,
+        uniqueNativeSpecies,
+        uniqueInvasiveSpecies,
+        contributors,
+      },
+      topThreats,
+      trend: {
+        direction: delta7d > 0 ? 'up' : delta7d < 0 ? 'down' : 'flat',
+        delta7d,
+      },
+      computedAt: new Date().toISOString(),
+      source: 'supabase',
+    })
+  } catch (err) {
+    handleRouteError(err, 'region/score', res, next)
+  }
 })
 
 export default router
