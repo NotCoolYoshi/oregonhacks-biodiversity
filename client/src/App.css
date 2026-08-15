@@ -29,3 +29,82 @@
 .main {
   padding-top: 1.5rem;
 }
+
+/* User profile card on the home page */
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(34, 139, 34, 0.15);
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(250, 255, 240, 0.6));
+}
+
+.user-profile .avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  background: #fff;
+  border: 2px solid rgba(34, 139, 34, 0.25);
+}
+
+.user-profile .profile-text .name {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.user-profile .profile-text .owned {
+  color: rgba(0,0,0,0.6);
+  margin-top: 0.25rem;
+}
+
+/* Loading skeletons */
+.user-profile--loading .avatar--skeleton {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.08));
+  border-radius: 8px;
+}
+.user-profile--loading .skeleton {
+  height: 14px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.05), rgba(0,0,0,0.08));
+  border-radius: 4px;
+  margin: 8px 0;
+}
+.user-profile--loading .skeleton.name { width: 140px }
+.user-profile--loading .skeleton.owned { width: 100px }
+
+/* Pin banner at top of home page */
+.pin-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 999px;
+  border: 2px solid rgba(34, 139, 34, 0.4);
+  background: rgba(245, 255, 240, 0.9);
+  margin-bottom: 0.75rem;
+  position: relative;
+}
+.pin-leaf {
+  font-size: 18px;
+  color: #2e8b57;
+}
+.pin-text {
+  flex: 1 1 auto;
+  font-size: 0.95rem;
+  color: #073b07;
+}
+.pin-close {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: rgba(0,0,0,0.6);
+}
