@@ -18,9 +18,10 @@ create extension if not exists pgcrypto;
 create table if not exists public.catches (
   id              uuid primary key default gen_random_uuid(),
 
-  -- No auth yet: the client generates a session_id and keeps it in
-  -- localStorage. Swap for auth.uid() when real accounts land.
-  session_id      text        not null,
+  -- No auth yet: the client generates an id and keeps it in localStorage.
+  -- Swap for auth.uid() when real accounts land. Named user_id (not
+  -- session_id) to match the `userId` the API and client already speak.
+  user_id         text        not null,
 
   taxon_id        integer     not null,
   scientific_name text        not null,
@@ -28,7 +29,10 @@ create table if not exists public.catches (
 
   -- 'catch'         = species is native to this place, goes in the dex
   -- 'threat_report' = species is introduced/invasive, gets flagged
-  kind            text        not null check (kind in ('catch', 'threat_report')),
+  --
+  -- Set server-side from the iNaturalist establishment means, never from the
+  -- client's claim — see POST /api/catches in routes/api.js.
+  type            text        not null check (type in ('catch', 'threat_report')),
 
   place_id        integer,
   place_name      text,
@@ -43,10 +47,10 @@ create table if not exists public.catches (
 -- GET /api/region/:placeId/score groups by place_id.
 create index if not exists catches_place_id_idx on public.catches (place_id);
 
--- The dex reads one session's catches, newest first.
-create index if not exists catches_session_id_idx on public.catches (session_id);
-create index if not exists catches_session_created_idx
-  on public.catches (session_id, created_at desc);
+-- The dex reads one user's catches, newest first.
+create index if not exists catches_user_id_idx on public.catches (user_id);
+create index if not exists catches_user_created_idx
+  on public.catches (user_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
@@ -59,3 +63,12 @@ create index if not exists catches_session_created_idx
 -- Leave this on. Add policies when/if the client talks to Supabase directly.
 -- ---------------------------------------------------------------------------
 alter table public.catches enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Privileges
+--
+-- The service role bypasses RLS but NOT table-level grants. Without this the
+-- server gets `42501: permission denied for table catches` on every query,
+-- which is easy to misread as an RLS problem and is not one.
+-- ---------------------------------------------------------------------------
+grant select, insert, update, delete on public.catches to service_role;
