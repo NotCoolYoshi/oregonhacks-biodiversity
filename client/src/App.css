@@ -1,0 +1,31 @@
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  text-align: left;
+}
+
+.header h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+}
+
+.nav {
+  display: flex;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.nav a {
+  text-decoration: none;
+}
+
+.nav a.active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.main {
+  padding-top: 1.5rem;
+}

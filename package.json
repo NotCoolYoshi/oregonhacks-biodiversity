@@ -1,0 +1,13 @@
+{
+  "name": "oregonhacks-biodiversity",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Photograph a plant, catch it in your dex or flag it as an invasive threat.",
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "install:all": "npm install && npm --prefix server install && npm --prefix client install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
