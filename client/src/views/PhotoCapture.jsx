@@ -4,10 +4,6 @@ import { identify, getSpeciesStatus, createCatch } from '../api'
 import { getUserId } from '../session'
 import { describeIdentifyError, describeSubmitError, describeRetriesExhausted } from '../errors'
 
-// Every region in this app is Oregon for now. The server defaults to the same
-// id, and there is no place picker to build against yet.
-const PLACE_ID = 10
-
 /**
  * Pl@ntNet's own accuracy ranking, best first.
  *
@@ -313,7 +309,11 @@ export default function PhotoCapture() {
       // inatTaxonId is null on every real Pl@ntNet result, so the scientific
       // name is what actually resolves this most of the time — api.js sends
       // it as ?scientific_name= when the id is missing.
-      setStatus(await getSpeciesStatus(candidate.inatTaxonId, PLACE_ID, candidate.scientificName))
+      //
+      // `location` is what makes this verdict local. Without it the server
+      // falls back to a fixed region and reports placeSource: 'fallback',
+      // which the verdict block below surfaces rather than hiding.
+      setStatus(await getSpeciesStatus(candidate.inatTaxonId, location, candidate.scientificName))
     } catch (err) {
       // Deliberately not an error state. This preview only tells the user what
       // to expect; POST /api/catches recomputes the authoritative type from
@@ -341,7 +341,8 @@ export default function PhotoCapture() {
           // Omitted when the preview failed: an invented claim would be
           // reported back as `typeCorrected` and confuse the result screen.
           type: status?.classification,
-          placeId: PLACE_ID,
+          // No placeId: the server derives the place from these coordinates,
+          // which is what keeps the verdict about where the photo was taken.
           ...(location ? { location } : {}),
           // No photoUrl — there is no image storage in this app yet.
         }),
@@ -466,6 +467,17 @@ export default function PhotoCapture() {
               {status.commonName ?? selected.commonNames?.[0] ?? selected.scientificName} is
               recorded as <strong>{status.establishmentMeans}</strong> in {status.placeName}.
             </p>
+            {/* The verdict is only meaningful about the region it was read
+                from. When we could not work out where the user is, saying so
+                is the difference between "not native here" and this app's
+                original bug — telling someone in Arizona their palo verde is
+                not native to Oregon. */}
+            {status.placeSource === 'fallback' && (
+              <p className="capture-muted">
+                We could not tell where you are, so this was checked against{' '}
+                {status.placeName}. Turn on location for a verdict about your own region.
+              </p>
+            )}
             {status.conservationStatus?.statusName && (
               <p className="capture-muted">
                 Conservation status: {status.conservationStatus.statusName}

@@ -708,9 +708,13 @@
    colour (7.1:1).
    --------------------------------------------------------------------------- */
 
+/* auto-fit rather than a fixed count: the strip gained a fourth slab when the
+   region stopped being a constant and had to start naming itself, and four
+   across is too tight to read before the stacking breakpoint below. This
+   reflows to two-by-two on the way down instead of squeezing. */
 .stat-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.6rem;
   margin: 0 0 1rem;
 }
@@ -735,6 +739,13 @@
   font-weight: 700;
   line-height: 1.1;
   color: var(--highlight);
+}
+
+/* A place name is not a numeral. At 1.5rem "Multnomah County, OR, US" wraps to
+   three lines and drags the slab taller than the three beside it. */
+.stat dd.stat-value-text {
+  font-size: 0.95rem;
+  line-height: 1.25;
 }
 
 /* Three slabs of "Threats reported" wrap to two lines each on a narrow phone.

@@ -24,6 +24,12 @@ const { default: router } = await import('../src/routes/api.js')
 
 // Keyed by iNaturalist taxon id. Establishment means is what the route uses to
 // decide catch vs threat_report, so each id here is a fixed verdict.
+//
+// `means` is keyed by place id, because that is the whole point: the same taxon
+// is native in one place and unheard of in another, and the route's job is to
+// ask about the right one. A place absent from `means` is a place iNaturalist
+// has no checklist entry for — which is a real answer ('unknown'), not a gap in
+// the fixture.
 const TAXA = {
   126887: {
     id: 126887,
@@ -31,7 +37,7 @@ const TAXA = {
     preferred_common_name: 'Oregon grape',
     rank: 'species',
     observations_count: 68775,
-    establishment_means: { establishment_means: 'native', place: { id: 10 } },
+    means: { 10: 'native' },
   },
   61317: {
     id: 61317,
@@ -39,7 +45,7 @@ const TAXA = {
     preferred_common_name: 'Armenian Blackberry',
     rank: 'species',
     observations_count: 40000,
-    establishment_means: { establishment_means: 'introduced', place: { id: 10 } },
+    means: { 10: 'introduced' },
   },
   48472: {
     id: 48472,
@@ -47,18 +53,19 @@ const TAXA = {
     preferred_common_name: 'Douglas-fir',
     rank: 'species',
     observations_count: 11078,
-    establishment_means: { establishment_means: 'native', place: { id: 10 } },
+    means: { 10: 'native' },
   },
-  // No establishment_means and no listed_taxa: iNaturalist has no checklist
-  // entry for this taxon here. classify() files it as a 'catch' (a species we
-  // cannot classify is not evidence of a threat), which is exactly the case
-  // that must NOT be counted as a native species.
+  // No establishment means anywhere: iNaturalist has no checklist entry for
+  // this taxon at all. classify() files it as a 'catch' (a species we cannot
+  // classify is not evidence of a threat), which is exactly the case that must
+  // NOT be counted as a native species.
   42220: {
     id: 42220,
     name: 'Odocoileus hemionus',
     preferred_common_name: 'Mule Deer',
     rank: 'species',
     observations_count: 15640,
+    means: {},
   },
   58732: {
     id: 58732,
@@ -66,13 +73,98 @@ const TAXA = {
     preferred_common_name: 'Scotch broom',
     rank: 'species',
     observations_count: 942,
-    establishment_means: { establishment_means: 'invasive', place: { id: 10 } },
+    // Invasive in Oregon, native in Arizona's neighbour set it is not — but the
+    // shape that matters here is that one taxon carries two different verdicts.
+    means: { 10: 'invasive' },
   },
+  // The regression this whole change is about. A blue palo verde photographed
+  // in Phoenix is native there and unlisted in Oregon; checked against the old
+  // fixed place id it came back unclassified.
+  63603: {
+    id: 63603,
+    name: 'Parkinsonia florida',
+    preferred_common_name: 'Blue palo verde',
+    rank: 'species',
+    observations_count: 8400,
+    means: { 40: 'native' },
+  },
+  // Introduced to Arizona and native to Oregon, so it cannot be classified
+  // correctly in both without reading the place the photo was taken in.
+  99001: {
+    id: 99001,
+    name: 'Test dualis',
+    preferred_common_name: 'Dual-status test plant',
+    rank: 'species',
+    observations_count: 12,
+    means: { 10: 'native', 40: 'introduced' },
+  },
+}
+
+/** A taxon as /v1/taxa returns it when asked about one particular place. */
+function taxonForPlace(taxon, placeId) {
+  const means = taxon.means?.[Number(placeId)]
+  const { means: _means, ...rest } = taxon
+
+  // iNaturalist omits establishment_means entirely rather than nulling it when
+  // a place has no checklist entry, and readEstablishmentMeans() reads the
+  // absence as 'unknown'. Modelling that exactly is what makes the unclassified
+  // cases in this file real.
+  if (!means) return rest
+
+  return {
+    ...rest,
+    establishment_means: { establishment_means: means, place: { id: Number(placeId) } },
+  }
 }
 
 const NAME_TO_ID = Object.fromEntries(
   Object.values(TAXA).map((taxon) => [taxon.name.toLowerCase(), taxon.id]),
 )
+
+// Two places, each with a coordinate inside it, standing in for
+// /v1/places/nearby. Oregon is what the app used to assume everywhere; Arizona
+// is the case that used to be answered wrong.
+//
+// `standard` is what the resolver reads, and it is ordered the way iNaturalist
+// orders it — continent, country, state, county — so the admin_level
+// preference is actually exercised rather than being satisfied by luck.
+const PLACES_BY_REGION = {
+  oregon: {
+    at: { lat: 44.05, lng: -123.08 },
+    standard: [
+      { id: 97394, name: 'North America', display_name: 'North America', admin_level: -10 },
+      { id: 1, name: 'United States', display_name: 'United States', admin_level: 0 },
+      { id: 10, name: 'Oregon', display_name: 'Oregon, US', admin_level: 10 },
+      { id: 981, name: 'Lane', display_name: 'Lane County, OR, US', admin_level: 20 },
+    ],
+  },
+  arizona: {
+    at: { lat: 33.45, lng: -112.07 },
+    standard: [
+      { id: 97394, name: 'North America', display_name: 'North America', admin_level: -10 },
+      { id: 1, name: 'United States', display_name: 'United States', admin_level: 0 },
+      { id: 40, name: 'Arizona', display_name: 'Arizona, US', admin_level: 10 },
+      { id: 1861, name: 'Maricopa', display_name: 'Maricopa County, US, AZ', admin_level: 20 },
+    ],
+  },
+  // Mid-Pacific: iNaturalist has no standard place here, which is the case the
+  // resolver has to answer with null rather than a guess.
+  ocean: { at: { lat: 0, lng: -160 }, standard: [] },
+}
+
+const ALL_STANDARD_PLACES = Object.values(PLACES_BY_REGION).flatMap((r) => r.standard)
+
+/** The seeded region whose coordinate falls inside the requested bbox. */
+const regionForBbox = (url) => {
+  const swlat = Number(url.searchParams.get('swlat'))
+  const nelat = Number(url.searchParams.get('nelat'))
+  const swlng = Number(url.searchParams.get('swlng'))
+  const nelng = Number(url.searchParams.get('nelng'))
+
+  return Object.values(PLACES_BY_REGION).find(
+    ({ at }) => at.lat >= swlat && at.lat <= nelat && at.lng >= swlng && at.lng <= nelng,
+  )
+}
 
 // Stands in for public.catches.
 let table = []
@@ -107,12 +199,29 @@ const json = (body, status = 200) =>
 let failTaxaLookup = false
 
 function handleINaturalist(url) {
+  // /v1/places/nearby?nelat=&nelng=&swlat=&swlng=  — coordinates to a place.
+  if (url.pathname === '/v1/places/nearby') {
+    const region = regionForBbox(url)
+    return json({ results: { standard: region?.standard ?? [], community: [] } })
+  }
+
+  // /v1/places/:id — a place id to its name.
+  const place = url.pathname.match(/^\/v1\/places\/(\d+)$/)
+  if (place) {
+    const found = ALL_STANDARD_PLACES.find((p) => p.id === Number(place[1]))
+    return json({ total_results: found ? 1 : 0, results: found ? [found] : [] })
+  }
+
   // /v1/taxa/:id  (one or more comma-separated ids)
   const detail = url.pathname.match(/^\/v1\/taxa\/([\d,]+)$/)
   if (detail) {
     if (failTaxaLookup) return json({ error: 'upstream is down' }, 500)
+    const placeId = url.searchParams.get('place_id')
     const ids = detail[1].split(',').map(Number)
-    const results = ids.map((id) => TAXA[id]).filter(Boolean)
+    const results = ids
+      .map((id) => TAXA[id])
+      .filter(Boolean)
+      .map((taxon) => taxonForPlace(taxon, placeId))
     return json({ total_results: results.length, results })
   }
 
@@ -120,7 +229,7 @@ function handleINaturalist(url) {
   if (url.pathname === '/v1/taxa') {
     const q = (url.searchParams.get('q') ?? '').toLowerCase()
     const id = NAME_TO_ID[q]
-    return json({ total_results: id ? 1 : 0, results: id ? [TAXA[id]] : [] })
+    return json({ total_results: id ? 1 : 0, results: id ? [taxonForPlace(TAXA[id])] : [] })
   }
 
   return json({ error: `unstubbed iNaturalist path ${url.pathname}` }, 404)
@@ -300,15 +409,123 @@ const listCatches = async (query = '') => {
   return { status: res.status, body: await res.json() }
 }
 
-const CATCH = { userId: 'usr_1', placeId: 10, location: { lat: 44.05, lng: -123.08 } }
+const getStatus = async (query) => {
+  const res = await realFetch(`${base}/api/species/${query}`)
+  return { status: res.status, body: await res.json() }
+}
+
+const resolvePlace = async (query) => {
+  const res = await realFetch(`${base}/api/places/resolve${query}`)
+  return { status: res.status, body: await res.json() }
+}
+
+const IN_OREGON = PLACES_BY_REGION.oregon.at
+const IN_ARIZONA = PLACES_BY_REGION.arizona.at
+
+const CATCH = { userId: 'usr_1', placeId: 10, location: IN_OREGON }
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The place a request is about, which decides which checklist the
+// native/invasive verdict is read from. Everything used to be Oregon.
+// ---------------------------------------------------------------------------
+
+console.log('\n-- coordinates resolve to a place --')
+
+let p = await resolvePlace(`?lat=${IN_OREGON.lat}&lng=${IN_OREGON.lng}`)
+check('Oregon coordinates resolve to Oregon', p.body.placeId === 10, p.body.placeId)
+check('...named from iNaturalist display_name', p.body.placeName === 'Oregon, US', p.body.placeName)
+
+p = await resolvePlace(`?lat=${IN_ARIZONA.lat}&lng=${IN_ARIZONA.lng}`)
+check('Arizona coordinates resolve to Arizona, not Oregon', p.body.placeId === 40, p.body.placeId)
+check('...named correctly', p.body.placeName === 'Arizona, US', p.body.placeName)
+
+// State over county over country: county checklists are mostly empty, so the
+// most precise place is not the most useful one.
+check('the state level is preferred over the county', p.body.adminLevel === 10, p.body.adminLevel)
+
+p = await resolvePlace('?lat=0&lng=-160')
+check('coordinates in no standard place -> 404', p.status === 404, p.status)
+check('...coded PLACE_NOT_FOUND', p.body.code === 'PLACE_NOT_FOUND', p.body.code)
+
+p = await resolvePlace('?lat=44.05')
+check('missing lng -> 400', p.status === 400, p.status)
+p = await resolvePlace('?lat=999&lng=-123')
+check('out-of-range lat -> 400', p.status === 400, p.status)
+
+console.log('\n-- the verdict follows the coordinates, not a fixed region --')
+
+// The reported bug, end to end: a blue palo verde photographed in Phoenix.
+// Against Oregon's checklist it is unlisted; against Arizona's it is native.
+let s = await getStatus(`63603/status?lat=${IN_ARIZONA.lat}&lng=${IN_ARIZONA.lng}`)
+check('palo verde in Arizona is checked against Arizona', s.body.placeId === 40, s.body.placeId)
+check('...and comes back native', s.body.establishmentMeans === 'native', s.body.establishmentMeans)
+check('...as a catch', s.body.classification === 'catch', s.body.classification)
+check('...with the place derived from coordinates',
+  s.body.placeSource === 'coordinates', s.body.placeSource)
+
+s = await getStatus(`63603/status?lat=${IN_OREGON.lat}&lng=${IN_OREGON.lng}`)
+check('the same plant in Oregon is unlisted there',
+  s.body.placeId === 10 && s.body.establishmentMeans === 'unknown',
+  `${s.body.placeId} ${s.body.establishmentMeans}`)
+
+// One taxon, two verdicts. Nothing but the coordinates differs between these.
+s = await getStatus(`99001/status?lat=${IN_OREGON.lat}&lng=${IN_OREGON.lng}`)
+check('a dual-status taxon is native in Oregon',
+  s.body.establishmentMeans === 'native' && s.body.classification === 'catch',
+  `${s.body.establishmentMeans} ${s.body.classification}`)
+
+s = await getStatus(`99001/status?lat=${IN_ARIZONA.lat}&lng=${IN_ARIZONA.lng}`)
+check('...and introduced in Arizona',
+  s.body.establishmentMeans === 'introduced' && s.body.classification === 'threat_report',
+  `${s.body.establishmentMeans} ${s.body.classification}`)
+
+// A caller that knows its own region still wins, and a caller with nothing to
+// go on still gets an answer rather than an error.
+s = await getStatus(`99001/status?place_id=40&lat=${IN_OREGON.lat}&lng=${IN_OREGON.lng}`)
+check('an explicit place_id overrides the coordinates', s.body.placeId === 40, s.body.placeId)
+check('...and says the place was explicit', s.body.placeSource === 'explicit', s.body.placeSource)
+
+s = await getStatus('99001/status')
+check('no coordinates falls back rather than failing', s.status === 200, s.status)
+check('...to the fallback place', s.body.placeId === 10, s.body.placeId)
+check('...and declares it a fallback', s.body.placeSource === 'fallback', s.body.placeSource)
+
+// Coordinates in no place are the same situation as no coordinates: fall back,
+// and say so, rather than 404ing a capture.
+s = await getStatus('99001/status?lat=0&lng=-160')
+check('unresolvable coordinates fall back too',
+  s.status === 200 && s.body.placeSource === 'fallback', `${s.status} ${s.body.placeSource}`)
+
+console.log('\n-- catches are classified against where they were taken --')
+resetTable()
+
+let r = await post({ userId: 'usr_az', taxonId: 63603, location: IN_ARIZONA })
+check('an Arizona catch is stored against Arizona', r.body.placeId === 40, r.body.placeId)
+check('...with the resolved place name', r.body.placeName === 'Arizona, US', r.body.placeName)
+check('...and the row agrees', table[0].place_id === 40, table[0].place_id)
+
+// Same species, same user, other state: the duplicate rule is per place, so
+// this is a second real observation rather than a rejected one.
+r = await post({ userId: 'usr_az', taxonId: 99001, location: IN_ARIZONA })
+check('a taxon introduced in Arizona is a threat report there',
+  r.body.type === 'threat_report', r.body.type)
+r = await post({ userId: 'usr_az', taxonId: 99001, location: IN_OREGON })
+check('...and the same taxon in Oregon is a catch', r.body.type === 'catch', r.body.type)
+check('...recorded in a different place', r.body.placeId === 10, r.body.placeId)
+
+r = await post({ userId: 'usr_az', taxonId: 63603 })
+check('a catch with no location still records', r.status === 201, r.status)
+check('...against the fallback place, declared as such',
+  r.body.placeId === 10 && r.body.placeSource === 'fallback',
+  `${r.body.placeId} ${r.body.placeSource}`)
 
 console.log('\n-- type is decided server-side, not by the client --')
 resetTable()
 
 // Armenian blackberry is introduced. The client says it caught one.
-let r = await post({ ...CATCH, taxonId: 61317, type: 'catch' })
+r = await post({ ...CATCH, taxonId: 61317, type: 'catch' })
 check('invasive claimed as catch is stored as threat_report',
   r.status === 201 && r.body.type === 'threat_report', `${r.status} ${r.body.type}`)
 check('override is reported via typeCorrected', r.body.typeCorrected === true)
@@ -582,7 +799,11 @@ check('placeId filter spans users',
   JSON.stringify(l.body.catches.map((row) => row.taxon_id)))
 check('the other place is excluded', !l.body.catches.some((row) => row.taxon_id === 48472))
 check('placeId echoed back as a number', l.body.placeId === 10, l.body.placeId)
-check('placeName resolved for the filtered place', l.body.placeName === 'Oregon', l.body.placeName)
+// Named from iNaturalist rather than from the three-entry map in mocks.js.
+// display_name and not name: "Lane" is not a place anyone can find, and as
+// soon as the app spans two states "Oregon" alone stops being enough either.
+check('placeName resolved for the filtered place', l.body.placeName === 'Oregon, US',
+  l.body.placeName)
 
 l = await listCatches('?userId=usr_1&placeId=10')
 check('both filters AND together', l.body.totalResults === 2, l.body.totalResults)

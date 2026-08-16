@@ -9,13 +9,24 @@ import {
   getNearbySpecies,
   getEstablishmentMeans,
   isNativeMeans,
+  resolvePlaceFromCoords,
+  getPlaceName,
   INaturalistError,
 } from '../services/inaturalist.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
 
 const router = Router()
 
-const DEFAULT_PLACE_ID = 10 // iNaturalist place_id for Oregon
+/**
+ * The place used when a request carries neither coordinates nor an explicit id.
+ *
+ * This used to be DEFAULT_PLACE_ID and it was applied to every request, which
+ * is what made the app answer "is this native to Oregon?" no matter where the
+ * photo was taken. It is now only reached by a request that gave us nothing to
+ * work with — a capture with geolocation denied, or an old client. Anything
+ * carrying lat/lng resolves its own place; see resolvePlaceForRequest().
+ */
+const FALLBACK_PLACE_ID = 10 // iNaturalist place_id for Oregon
 
 // Threat reports are worth more than catches: spotting an invasive is the
 // action we actually want out of this app, and it is the less fun one.
@@ -66,6 +77,100 @@ function gradeFor(score) {
   ]
   return scale.find(([min]) => score >= min)?.[1] ?? 'F'
 }
+
+// ---------------------------------------------------------------------------
+// Places
+//
+// Which place a request is about decides which species checklist the
+// native/invasive verdict is read from, so this is the hinge the whole
+// classification turns on. It is derived from the coordinates the capture flow
+// already sends, never from a constant.
+// ---------------------------------------------------------------------------
+
+/**
+ * Name a place id, degrading rather than failing.
+ *
+ * iNaturalist is the authority, mocks.PLACES is the offline seed, and
+ * "Place 40" is the floor. A name is decoration on every route that renders one
+ * — none of them should 502 because a label could not be fetched.
+ */
+async function describePlace(placeId) {
+  try {
+    return await getPlaceName(placeId)
+  } catch {
+    return placeName(placeId)
+  }
+}
+
+/**
+ * Decide which place a request is about, in priority order:
+ *
+ *   1. An explicit placeId. Nothing else can override a caller that knows.
+ *   2. Coordinates -> the containing place, via iNaturalist. This is the path
+ *      every real capture takes, and it is what makes the verdict local.
+ *   3. FALLBACK_PLACE_ID, for a request that supplied neither.
+ *
+ * Step 2 degrades to step 3 rather than failing: geolocation that cannot be
+ * turned into a place is a reason to fall back, not a reason to refuse a catch.
+ * `source` reports which step answered so callers can say so.
+ *
+ * @returns {Promise<{ placeId: number, placeName: string, source: string }>}
+ */
+async function resolvePlaceForRequest({ lat, lng, placeId }) {
+  const explicit = Number(placeId)
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return { placeId: explicit, placeName: await describePlace(explicit), source: 'explicit' }
+  }
+
+  const hasCoords = Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))
+  if (hasCoords) {
+    try {
+      const place = await resolvePlaceFromCoords(lat, lng)
+      if (place) {
+        return { placeId: place.placeId, placeName: place.placeName, source: 'coordinates' }
+      }
+      console.warn(`[places] no standard iNaturalist place contains (${lat}, ${lng})`)
+    } catch (err) {
+      console.warn(`[places] could not resolve (${lat}, ${lng}): ${err.message}`)
+    }
+  }
+
+  return {
+    placeId: FALLBACK_PLACE_ID,
+    placeName: await describePlace(FALLBACK_PLACE_ID),
+    source: 'fallback',
+  }
+}
+
+/**
+ * GET /api/places/resolve?lat=&lng=
+ * Coordinates -> the place whose species list applies there.
+ *
+ * The client needs this on its own for the map, which has to know which
+ * region's score to show before it has anything to identify.
+ */
+router.get('/places/resolve', async (req, res, next) => {
+  const { lat, lng } = req.query
+
+  if (lat == null || lng == null) {
+    return res.status(400).json({ error: 'lat and lng are required', code: 'BAD_REQUEST' })
+  }
+
+  try {
+    const place = await resolvePlaceFromCoords(lat, lng)
+
+    if (!place) {
+      return res.status(404).json({
+        error: `iNaturalist has no place covering (${lat}, ${lng}).`,
+        code: 'PLACE_NOT_FOUND',
+      })
+    }
+
+    res.json({ ...place, source: 'iNaturalist' })
+  } catch (err) {
+    handleRouteError(err, 'places/resolve', res, next)
+  }
+})
 
 /**
  * POST /api/identify
@@ -234,21 +339,31 @@ async function resolveTaxonIdParam(req) {
 }
 
 /**
- * GET /api/species/:taxonId/status?place_id=&scientific_name=
+ * GET /api/species/:taxonId/status?lat=&lng=&place_id=&scientific_name=
  * Establishment means + conservation status for a taxon in a place.
  * `classification` is what the client uses to decide catch vs threat_report.
+ *
+ * Pass lat/lng — the place is derived from them. `place_id` still overrides,
+ * for a caller that already knows which region it means.
  */
 router.get('/species/:taxonId/status', async (req, res, next) => {
-  const placeId = Number(req.query.place_id) || DEFAULT_PLACE_ID
-
   try {
+    const place = await resolvePlaceForRequest({
+      lat: req.query.lat,
+      lng: req.query.lng,
+      placeId: req.query.place_id,
+    })
     const taxonId = await resolveTaxonIdParam(req)
-    const status = await getTaxonStatus(taxonId, placeId)
+    const status = await getTaxonStatus(taxonId, place.placeId)
 
     res.json({
       ...status,
-      placeId,
-      placeName: placeName(placeId),
+      placeId: place.placeId,
+      placeName: place.placeName,
+      // Which of the three rules named this place. 'fallback' means we had
+      // nothing to go on and the verdict may be about the wrong region — the
+      // client says so rather than presenting it as local.
+      placeSource: place.source,
       source: 'iNaturalist',
     })
   } catch (err) {
@@ -257,13 +372,17 @@ router.get('/species/:taxonId/status', async (req, res, next) => {
 })
 
 /**
- * GET /api/species/:taxonId/phenology?place_id=&scientific_name=
+ * GET /api/species/:taxonId/phenology?lat=&lng=&place_id=&scientific_name=
  * Monthly observation histogram -> which months this species is typically seen.
  */
 router.get('/species/:taxonId/phenology', async (req, res, next) => {
-  const placeId = Number(req.query.place_id) || DEFAULT_PLACE_ID
-
   try {
+    const place = await resolvePlaceForRequest({
+      lat: req.query.lat,
+      lng: req.query.lng,
+      placeId: req.query.place_id,
+    })
+    const placeId = place.placeId
     const taxonId = await resolveTaxonIdParam(req)
     const histogram = await getPhenology(taxonId, placeId)
 
@@ -284,7 +403,8 @@ router.get('/species/:taxonId/phenology', async (req, res, next) => {
     res.json({
       taxonId,
       placeId,
-      placeName: placeName(placeId),
+      placeName: place.placeName,
+      placeSource: place.source,
       histogram,
       peakMonths,
       currentMonth,
@@ -315,7 +435,7 @@ router.get('/region/:placeId/nearby', async (req, res, next) => {
 
     res.json({
       placeId,
-      placeName: placeName(placeId),
+      placeName: await describePlace(placeId),
       radiusKm,
       totalResults: results.length,
       results,
@@ -331,13 +451,17 @@ router.get('/region/:placeId/nearby', async (req, res, next) => {
  * Body: { userId, taxonId, scientificName, commonName, type, location: { lat, lng },
  *         placeId, photoUrl, confidence }
  * Records a capture or a threat report.
+ *
+ * `location` decides the place, and through it the native/invasive verdict —
+ * see resolvePlaceForRequest(). `placeId` is accepted but no longer expected
+ * from the capture flow.
  */
 router.post('/catches', async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   const body = req.body ?? {}
   const userId = String(body.userId ?? '').trim()
-  const placeId = Number(body.placeId) || DEFAULT_PLACE_ID
+  const location = body.location ?? {}
 
   if (!userId) {
     return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
@@ -349,6 +473,17 @@ router.post('/catches', async (req, res, next) => {
   }
 
   try {
+    // Where the photo was taken, which decides which checklist the verdict
+    // below is read from. Resolved server-side from the submitted coordinates
+    // for the same reason `type` is: a client that names its own place could
+    // name one where its invasive is native.
+    const place = await resolvePlaceForRequest({
+      lat: location.lat,
+      lng: location.lng,
+      placeId: body.placeId,
+    })
+    const placeId = place.placeId
+
     // Resolve the taxon the same way the status route does — a Pl@ntNet
     // identification arrives with inatTaxonId: null, so the client may only
     // have a name to give us.
@@ -401,7 +536,7 @@ router.post('/catches', async (req, res, next) => {
       return res.status(409).json({
         error:
           `You have already logged ${status.scientificName} in ` +
-          `${placeName(placeId)}. Catch it somewhere else for another entry.`,
+          `${place.placeName}. Catch it somewhere else for another entry.`,
         code: 'DUPLICATE_CATCH',
         existingCatchId: priorHere.id,
       })
@@ -409,7 +544,6 @@ router.post('/catches', async (req, res, next) => {
 
     const isFirstCatch = (existing?.length ?? 0) === 0
 
-    const location = body.location ?? {}
     const { data: row, error: insertError } = await sb
       .from('catches')
       .insert({
@@ -421,7 +555,7 @@ router.post('/catches', async (req, res, next) => {
         common_name: status.commonName ?? body.commonName ?? null,
         type,
         place_id: placeId,
-        place_name: placeName(placeId),
+        place_name: place.placeName,
         lat: Number.isFinite(Number(location.lat)) ? Number(location.lat) : null,
         lng: Number.isFinite(Number(location.lng)) ? Number(location.lng) : null,
         photo_url: body.photoUrl ?? null,
@@ -441,6 +575,10 @@ router.post('/catches', async (req, res, next) => {
       commonName: row.common_name,
       placeId: row.place_id,
       placeName: row.place_name,
+      // Which rule named the place. 'fallback' is the one worth showing a user:
+      // it means the verdict above is about FALLBACK_PLACE_ID, not about where
+      // they are standing.
+      placeSource: place.source,
       location: { lat: row.lat, lng: row.lng },
       photoUrl: row.photo_url,
       confidence: row.confidence == null ? null : Number(row.confidence),
@@ -523,7 +661,7 @@ router.get('/catches', async (req, res, next) => {
     res.json({
       userId: userId || null,
       placeId: hasPlaceId ? placeId : null,
-      placeName: hasPlaceId ? placeName(placeId) : null,
+      placeName: hasPlaceId ? await describePlace(placeId) : null,
       totalResults: rows.length,
       catches: rows,
       source: 'supabase',
@@ -820,7 +958,7 @@ router.get('/region/:placeId/score', async (req, res, next) => {
 
     res.json({
       placeId,
-      placeName: placeName(placeId),
+      placeName: await describePlace(placeId),
       score,
       // 'N/A' rather than 'F': an empty region has not scored badly, it has not
       // been surveyed. The client should say so instead of grading it.

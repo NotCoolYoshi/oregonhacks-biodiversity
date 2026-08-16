@@ -40,7 +40,11 @@ April shouldn't be dangled in front of the user in November.
 `MapView` (Leaflet via react-leaflet) plots every catch and threat report as
 markers, with catches and invasives distinguished by marker shape as well as
 colour, and carries the regional biodiversity health score in a stat strip
-above the map. `SocialView` holds the leaderboard.
+above the map. It opens on the user's own location, falling back to their last
+catch and then to a world view; the stat strip reports whichever region the map
+is centred on, resolved from those coordinates. It fetches every catch rather
+than one place's, because filtering to a single region would hide every catch
+made outside it. `SocialView` holds the leaderboard.
 
 There is no separate region dashboard. The health score is a reading of what
 the map is already showing, so it sits on the map rather than on a page of its
@@ -86,14 +90,45 @@ identification be looked up in iNaturalist in the next step.
 
 Three routes, all unauthenticated public APIs:
 
-- `GET /api/species/:taxonId/status?place_id=` → `/v1/taxa/:id?place_id=`, read
+- `GET /api/species/:taxonId/status?lat=&lng=` → `/v1/taxa/:id?place_id=`, read
   `establishment_means` and `conservation_status`. This is what decides catch vs.
   threat report — and it must be decided **server-side**, not by a client that
   could be edited to farm points.
-- `GET /api/species/:taxonId/phenology?place_id=` → `/v1/observations/histogram`
+- `GET /api/species/:taxonId/phenology?lat=&lng=` → `/v1/observations/histogram`
   with `interval=month_of_year`, giving the 12-month observation curve.
 - `GET /api/region/:placeId/nearby` → `/v1/observations/species_counts`, the
   species recently observed near a place.
+- `GET /api/places/resolve?lat=&lng=` → `/v1/places/nearby`, which turns
+  coordinates into the place the two routes above are asked about.
+
+### Which place a verdict is about
+
+Every place-scoped route derives its place from the coordinates the capture
+flow already collects, via `resolvePlaceFromCoords()` in
+`services/inaturalist.js`. This is load-bearing: `establishment_means` is
+meaningless without a place, so asking about the wrong one produces a confident
+wrong answer rather than an error. The app previously sent a fixed
+`place_id=10` (Oregon) with every request, which is why a palo verde
+photographed in Arizona came back "not native" — it was native, just not to
+Oregon.
+
+`/v1/places/nearby` takes a bounding box and returns the standard places
+containing it, tagged by `admin_level`. We take the **state** (10) ahead of the
+county (20) and the country (0), and not because it is the most precise: it is
+the level iNaturalist actually maintains species checklists at. County-scoped
+lookups return a null establishment means for most taxa, which `classify()`
+would read as "unknown" and file as an ordinary catch — a more precise question
+returning a less useful answer.
+
+The lookup is one extra call per new area, cached 24h against coordinates
+rounded to ~1km, so a walk through a park costs one. Requests that carry no
+coordinates fall back to `FALLBACK_PLACE_ID` and report
+`placeSource: 'fallback'`, which the capture UI shows rather than passing off
+as a local verdict.
+
+Place *names* come from the same API (`getPlaceName()`), not from
+`mocks.PLACES` — a three-entry table cannot name Maricopa County. `PLACES` is
+now only the offline fallback for that lookup.
 
 GBIF is the fallback for taxa where iNaturalist has no establishment means for
 our place. Both are courteous-use APIs: send a real User-Agent and don't hammer
@@ -155,8 +190,8 @@ establishment means on the row would remove that hop; it is not stored today.
 - **Where does the photo live?** Right now `POST /api/identify` takes base64 in
   the request body (10mb cap). Fine for the demo; object storage is the real
   answer.
-- **How is a region chosen?** Currently an iNaturalist `place_id` (Oregon = 10).
-  Reverse-geocoding from the user's coordinates is nicer but is another
-  dependency.
+- ~~**How is a region chosen?**~~ Answered: from the user's coordinates, via
+  `/v1/places/nearby`. It turned out not to be another dependency — it is the
+  same iNaturalist API the status lookup already uses.
 - **Anonymous users?** A catalogue is more compelling when it persists, but forcing
   signup before the first catch will lose demo-watchers.
