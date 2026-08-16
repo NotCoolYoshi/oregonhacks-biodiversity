@@ -54,7 +54,7 @@ export default function HomeView() {
           </section>
         )}
 
-        {/* <section className="home-actions">
+        <section className="home-actions">
           <div className="action-card action-capture" onClick={() => navigate('/capture')}>
             <div className="action-icon">📸</div>
             <h3>Capture</h3>
@@ -78,7 +78,7 @@ export default function HomeView() {
             <h3>Social</h3>
             <p>Leaderboard, friends and quests</p>
           </div>
-        </section> */}
+        </section>
       </div>
     </div>
   )
