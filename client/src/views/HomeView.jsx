@@ -29,12 +29,6 @@ export default function HomeView() {
         <UserProfile />
       </div>
 
-      {/* <div className="home-tip">
-        <span className="tip-icon">🌿</span>
-        <p>Tips: Take clear photos of leaves or flowers for better ID results!</p>
-        <button className="tip-close" aria-label="Close">×</button>
-      </div> */}
-
       <div className="home-content">
         <section className="home-section">
           <h2>Welcome to Biodiversity</h2>
