@@ -8,7 +8,8 @@ OregonHacks 2026 · Nature + Tech · team of 3
   ┌─────────────────────────────┐
   │  client  (Vite + React)     │
   │  ├─ catalogue / catch UI    │
-  │  └─ map / region strip      │
+  │  ├─ map / region strip      │
+  │  └─ social / leaderboard    │
   └──────────────┬──────────────┘
                  │  HTTP, JSON only, no third-party keys
                  ▼
@@ -35,15 +36,15 @@ the "catchable nearby" list, so there's always a visible next thing to go find.
 Phenology data drives *in season* badges — a species whose observations peak in
 April shouldn't be dangled in front of the user in November.
 
-**Map view** (`MapView`) is the collective layer.
+**Map / social view** (`MapView`, `SocialView`) is the collective layer.
 `MapView` (Leaflet via react-leaflet) plots every catch and threat report as
 markers, with catches and invasives distinguished by marker shape as well as
 colour, and carries the regional biodiversity health score in a stat strip
-above the map.
+above the map. `SocialView` holds the leaderboard.
 
 There is no separate region dashboard. The health score is a reading of what
 the map is already showing, so it sits on the map rather than on a page of its
-own.
+own, and the leaderboard moved to Social.
 
 Both halves talk to the server through `client/src/api.js`, which is the only
 place a URL is written down.

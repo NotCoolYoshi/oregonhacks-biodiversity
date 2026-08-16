@@ -62,7 +62,7 @@ data later without touching the client.
 |---|---|---|
 | **[TEAMMATE 1]** | Backend & data integration | `server/` — Pl@ntNet and iNaturalist calls, database choice and schema, the region score |
 | **[TEAMMATE 2]** | Game / catalogue UI | `client/src/views/PhotoCapture.jsx`, `CatalogueView.jsx` — capture flow, catch vs. threat, collection |
-| **[TEAMMATE 3]** | Map view | `client/src/views/MapView.jsx` — Leaflet map, markers, region stat strip |
+| **[TEAMMATE 3]** | Map & social view | `client/src/views/MapView.jsx`, `SocialView.jsx` — Leaflet map, markers, region stat strip, leaderboard |
 
 Shared surface: `client/src/api.js` and `server/src/routes/api.js` define the
 contract between the three areas. Changing a response shape means telling the
@@ -73,7 +73,7 @@ other two.
 ```
 client/          Vite + React app
   src/api.js       every server call, in one place
-  src/views/       PhotoCapture, CatalogueView, MapView
+  src/views/       PhotoCapture, CatalogueView, MapView, SocialView
 server/          Node + Express proxy layer
   src/index.js     app setup, CORS, dotenv
   src/routes/      the six API routes

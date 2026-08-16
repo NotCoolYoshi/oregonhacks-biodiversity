@@ -745,3 +745,143 @@
     margin: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Social
+   --------------------------------------------------------------------------- */
+
+.social {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  max-width: 40rem;
+}
+
+.social-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.social-section h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+.social-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Yellow as a fill with dark text on it, never yellow text on the page. */
+.badge-placeholder {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--highlight);
+  color: var(--highlight-on);
+}
+
+.leaderboard {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.leader-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.leader-row.is-first {
+  border-color: var(--highlight);
+  background: var(--surface-raised);
+}
+
+.leader-rank {
+  flex: none;
+  width: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+
+.leader-row.is-first .leader-rank {
+  color: var(--text-h);
+}
+
+.leader-avatar {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
+}
+
+.leader-row.is-first .leader-avatar {
+  background: var(--highlight);
+}
+
+.leader-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-h);
+  font-size: 0.95rem;
+}
+
+.leader-meta {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.leader-points {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+/* Empty states -------------------------------------------------------------- */
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.1rem 1rem;
+  border-radius: var(--radius);
+  /* Dashed rather than solid: the section is a placeholder, and the border is
+     the cheapest way to say so without a second label on every one of them. */
+  border: 1px dashed var(--accent-border);
+  background: var(--social-bg);
+}
+
+.empty-icon {
+  font-size: 1.5rem;
+  flex: none;
+  opacity: 0.75;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}

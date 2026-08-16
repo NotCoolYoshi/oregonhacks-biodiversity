@@ -5,6 +5,7 @@ import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
 import CatalogueView from './views/CatalogueView'
 import MapView from './views/MapView'
+import SocialView from './views/SocialView'
 
 import './App.css'
 
@@ -31,6 +32,13 @@ const ICONS = {
       <path d="M9 3.5v14M15 6.5v14" />
     </>
   ),
+  social: (
+    <>
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19.5a5.5 5.5 0 0 1 11 0" />
+      <path d="M16 5.4a3.2 3.2 0 0 1 0 6.2M17.5 14.6a5.5 5.5 0 0 1 3 4.9" />
+    </>
+  ),
 }
 
 const TABS = [
@@ -38,6 +46,7 @@ const TABS = [
   { to: '/capture', icon: 'capture', label: 'Capture' },
   { to: '/catalogue', icon: 'catalogue', label: 'Catalogue' },
   { to: '/map', icon: 'map', label: 'Map' },
+  { to: '/social', icon: 'social', label: 'Social' },
 ]
 
 function Nav() {
@@ -85,6 +94,7 @@ export default function App() {
             <Route path="/capture" element={<PhotoCapture />} />
             <Route path="/catalogue" element={<CatalogueView />} />
             <Route path="/map" element={<MapView />} />
+            <Route path="/social" element={<SocialView />} />
             <Route path="*" element={<p>Not found.</p>} />
           </Routes>
         </main>

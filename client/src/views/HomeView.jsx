@@ -76,6 +76,12 @@ export default function HomeView() {
             <h3>Map</h3>
             <p>See recent captures nearby</p>
           </div>
+
+          <div className="action-card action-social" onClick={() => navigate('/social')}>
+            <div className="action-icon">🏆</div>
+            <h3>Social</h3>
+            <p>Leaderboard, friends and quests</p>
+          </div>
         </section>
       </div>
     </div>
