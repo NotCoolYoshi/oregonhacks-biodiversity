@@ -347,6 +347,13 @@ export default function PhotoCapture() {
       <section className="capture">
         <h2>Not confident enough — let’s try another photo</h2>
 
+        {/* The photo being rejected, so the tip below has something to be about.
+            Still in state at this point — clearPhoto() only drops it on the way
+            back to idle, which is after this screen is gone. */}
+        {photo && (
+          <img className="capture-preview" src={photo.dataUrl} alt="The photo that could not be identified" />
+        )}
+
         <p className="capture-note">{retryTip}</p>
 
         <p className="capture-muted">
