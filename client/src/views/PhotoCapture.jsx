@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+// Aliased: this component already has a `location` of its own, and it is a
+// pair of coordinates rather than a URL.
+import { useLocation as useRouterLocation } from 'react-router-dom'
 
 import { identify, getSpeciesStatus, createCatch } from '../api'
 import { getUserId } from '../session'
@@ -150,18 +153,42 @@ export default function PhotoCapture() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
 
-  const [location, setLocation] = useState(null)
-  const [locationState, setLocationState] = useState('pending')
+  /**
+   * Coordinates handed over by whoever navigated here — currently the map's
+   * "go catch this" action on a nearby unknown plant.
+   *
+   * Read once, on mount, and deliberately not kept in sync with the router:
+   * this seeds a capture session, and a session that changed where it thinks it
+   * is halfway through would be worse than one that never offered the shortcut.
+   */
+  const prefill = useRouterLocation().state?.prefill ?? null
+  const prefilledLocation =
+    prefill?.location &&
+    Number.isFinite(Number(prefill.location.lat)) &&
+    Number.isFinite(Number(prefill.location.lng))
+      ? { lat: Number(prefill.location.lat), lng: Number(prefill.location.lng) }
+      : null
+
+  const [location, setLocation] = useState(prefilledLocation)
+  const [locationState, setLocationState] = useState(prefilledLocation ? 'prefilled' : 'pending')
 
   const fileInputRef = useRef(null)
 
   // Ask for coordinates up front so they are ready by the time a catch is
   // submitted. Never gates anything: denied or unavailable just means the
   // catch is recorded without a location.
+  //
+  // Skipped entirely when the map already said where this is about. Asking
+  // would mean either overwriting the spot the user just tapped or prompting
+  // for a permission whose answer we would then throw away — and the pin they
+  // chose is the better answer to "which place is this verdict about" anyway,
+  // since it is where the plant was actually seen.
   useEffect(() => {
+    if (prefilledLocation) return undefined
+
     if (!navigator.geolocation) {
       setLocationState('unavailable')
-      return
+      return undefined
     }
 
     let cancelled = false
@@ -180,6 +207,8 @@ export default function PhotoCapture() {
     return () => {
       cancelled = true
     }
+    // Mount-only: prefilledLocation is derived from router state read once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /**
@@ -643,12 +672,18 @@ export default function PhotoCapture() {
 
       {!organ && photo && <p className="capture-muted">Pick what you photographed first.</p>}
 
+      {/* Where the coordinates came from, always. A prefilled location is the
+          one case where the recorded spot is not where the user is standing,
+          so it says so rather than presenting a borrowed pin as a fix. */}
       <p className="capture-muted capture-detail">
-        {locationState === 'ready'
-          ? `Location ready (${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}).`
-          : locationState === 'pending'
-            ? 'Asking for your location…'
-            : 'No location — your catch will be recorded without coordinates.'}
+        {locationState === 'prefilled'
+          ? `Using the map pin you tapped (${location.lat.toFixed(3)}, ${location.lng.toFixed(3)})` +
+            `${prefill?.commonName || prefill?.scientificName ? ` — where ${prefill.commonName ?? prefill.scientificName} was seen` : ''}.`
+          : locationState === 'ready'
+            ? `Location ready (${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}).`
+            : locationState === 'pending'
+              ? 'Asking for your location…'
+              : 'No location — your catch will be recorded without coordinates.'}
       </p>
     </section>
   )
