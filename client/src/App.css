@@ -441,6 +441,34 @@
   background: var(--color-threat-bg);
 }
 
+/* A third state, because native/invasive is not a binary: iNaturalist having
+   no checklist entry for a species here is a real answer and not a quiet
+   "native". Deliberately neutral — colouring it green or orange is exactly the
+   claim we cannot make. */
+.capture-verdict.is-unknown {
+  border-left: 4px solid var(--color-line-strong);
+  background: var(--color-deep-green-soft);
+}
+
+/* The live lookup is still in flight and the badge above it is showing stored
+   history. Quiet on purpose: it qualifies the badge rather than competing. */
+.verdict-checking {
+  font-weight: 400;
+  color: var(--text);
+}
+
+/* Stored history and the live lookup disagree. Set apart from the body text
+   because it is the one line on the card doing real work — reconciling two
+   answers instead of reporting one. */
+.verdict-diverged {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: calc(var(--radius) - 4px);
+  background: color-mix(in srgb, var(--color-accent-yellow) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-yellow) 60%, transparent);
+  font-size: 0.85rem;
+}
+
 /* ---------------------------------------------------------------------------
    Home view
    --------------------------------------------------------------------------- */
@@ -770,6 +798,77 @@
   background: var(--color-threat);
   border-radius: 2px;
   transform: rotate(45deg);
+}
+
+/* Nearby unknown plants: hollow and grey, so they read as absence against the
+   filled catch and threat pins. Rank drives the fill — a species-level
+   identification is something to go and find, a genus-level one is a lead, and
+   the dashed border says so without a second colour. */
+.map-pin-unknown .map-pin-shape,
+.map-pin-unknown-coarse .map-pin-shape,
+.map-swatch-unknown {
+  background: rgba(255, 255, 255, 0.55);
+  border: 2px solid #6b7c72;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.8);
+}
+
+.map-pin-unknown-coarse .map-pin-shape {
+  border-style: dashed;
+}
+
+.map-popup-unknown {
+  color: #55665d;
+}
+
+/* A link, not a button-shaped thing: it sits inside a Leaflet popup, which has
+   its own cramped typography and no room for the app's button padding. */
+.map-popup-action {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-deep-green);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------------------
+   Map layer switch
+
+   Only the additive layer gets a control. Catches are the map's subject, not a
+   layer — there is no version of this page where hiding them is useful.
+   --------------------------------------------------------------------------- */
+
+.map-layers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin: 0.6rem 0;
+}
+
+.map-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.map-layer-toggle input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-deep-green);
+  cursor: pointer;
+}
+
+.map-layer-caption {
+  /* Its own line on a narrow screen, trailing the switch on a wide one. */
+  flex: 1 1 12rem;
 }
 
 .map-legend {
@@ -1382,6 +1481,14 @@
 .sighting-place {
   font-weight: 600;
   color: var(--text-h);
+}
+
+/* What the row stored, when a fresh resolution of its own coordinates
+   disagrees. Struck through: the place did not change, our ability to name it
+   did, and the old name is history rather than an alternative. */
+.sighting-corrected {
+  text-decoration: line-through;
+  opacity: 0.7;
 }
 
 /* Coordinates are reference data, not prose — tabular figures stop the columns

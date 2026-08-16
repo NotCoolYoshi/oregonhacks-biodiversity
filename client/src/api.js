@@ -70,6 +70,24 @@ export const resolvePlace = ({ lat, lng }) =>
 export const getNearby = (placeId, params) =>
   api.get(`/api/region/${placeId}/nearby`, { params }).then((r) => r.data)
 
+/**
+ * GET /api/observations/nearby — plants observed around here that `userId` has
+ * not caught yet. The map's "nearby unknown plants" layer.
+ *
+ * `signal` is not optional in practice: this is called on every pan, and a
+ * response for a viewport the user has already left is worse than no response.
+ * Pass an AbortController's signal and abort it when the map moves again.
+ *
+ * The server caps the result at 30 rows however large the radius is.
+ */
+export const getNearbyObservations = ({ lat, lng, radiusKm, userId }, { signal } = {}) =>
+  api
+    .get('/api/observations/nearby', {
+      params: { lat, lng, radius: radiusKm, userId },
+      signal,
+    })
+    .then((r) => r.data)
+
 /** POST /api/catches — record a `catch` or a `threat_report`. */
 export const createCatch = (body) => api.post('/api/catches', body).then((r) => r.data)
 

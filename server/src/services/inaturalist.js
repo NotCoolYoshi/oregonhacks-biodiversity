@@ -96,6 +96,13 @@ async function get(path, params = {}) {
     if (value != null && value !== '') url.searchParams.set(key, String(value))
   }
 
+  // Logged unconditionally, one line per request that actually leaves the
+  // process. This is the only honest way to answer "how many calls did that
+  // pan cost?" — anything derived from request counts at the route level
+  // counts the ones the cache absorbed too.
+  usage.upstreamCalls += 1
+  console.info(`[inaturalist] upstream #${usage.upstreamCalls} GET ${path}`)
+
   let response
   try {
     response = await fetch(url, {
@@ -130,13 +137,47 @@ async function get(path, params = {}) {
 /** Tiny TTL memo — enough to keep a burst of catches off the upstream API. */
 const cache = new Map()
 
+/**
+ * Running totals, for answering "how much are we actually calling iNaturalist?"
+ *
+ * `upstreamCalls` is the number that costs something — every one of them is a
+ * request that left this process. The map's nearby-unknowns layer fires on pan,
+ * so this stopped being a rhetorical question. Read via inatUsage().
+ */
+const usage = { upstreamCalls: 0, cacheHits: 0, cacheMisses: 0 }
+
+/** A snapshot of upstream usage since the process started. */
+export const inatUsage = () => ({ ...usage, cacheEntries: cache.size })
+
+/**
+ * Memoise by key, storing the *promise* rather than the resolved value.
+ *
+ * Caching the promise is what makes two callers that miss at the same moment
+ * share one upstream request instead of racing to make two. That case used to
+ * be rare — a burst of catches — and is now the normal one: panning back to a
+ * cell whose request is still in flight is a thing a map does constantly.
+ *
+ * A rejected promise is evicted rather than cached, so a blip upstream doesn't
+ * pin an error in front of a key for the next 24 hours.
+ */
 async function cached(key, fn, ttlMs = CACHE_TTL_MS) {
   const hit = cache.get(key)
-  if (hit && hit.expiresAt > Date.now()) return hit.value
+  if (hit && hit.expiresAt > Date.now()) {
+    usage.cacheHits += 1
+    return hit.value
+  }
 
-  const value = await fn()
-  cache.set(key, { value, expiresAt: Date.now() + ttlMs })
-  return value
+  usage.cacheMisses += 1
+  const pending = fn()
+  cache.set(key, { value: pending, expiresAt: Date.now() + ttlMs })
+
+  try {
+    return await pending
+  } catch (err) {
+    // Only evict our own entry: a later call may already have replaced it.
+    if (cache.get(key)?.value === pending) cache.delete(key)
+    throw err
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +540,173 @@ export async function getEstablishmentMeans(taxonIds, placeId) {
 
 /** True when iNaturalist positively records this taxon as belonging here. */
 export const isNativeMeans = (means) => NATIVE_MEANS.has(means)
+
+// ---------------------------------------------------------------------------
+// Nearby observations — the map's "unknown plants" layer
+// ---------------------------------------------------------------------------
+
+// Plantae. /observations with no taxon filter returns every bird, beetle and
+// fungus in the box, and this app is about plants.
+const PLANTAE_TAXON_ID = 47126
+
+// How much ground one viewport may ask about. A zoomed-out map would otherwise
+// request a continent, and the cost of answering that lands on iNaturalist.
+const MAX_OBSERVATION_RADIUS_KM = 50
+const DEFAULT_OBSERVATION_RADIUS_KM = 10
+
+// One iNaturalist page, and deliberately far more rows than any caller plots.
+// Deduping by taxon throws most of them away — a well-walked park can spend a
+// whole page on a handful of species — so asking for 200 to render 30 is the
+// difference between 30 distinct species and the same five over and over.
+const OBSERVATION_PAGE_SIZE = 200
+
+// The same bargain the place resolver strikes, for the same reason: which
+// plants have been seen in a square kilometre does not change during a demo,
+// and a pan shorter than a grid cell should cost nothing. See gridBox().
+const OBSERVATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const OBSERVATION_GRID_DEGREES = 0.01
+
+const KM_PER_DEGREE_LAT = 111.32
+
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n))
+
+/** Snap to the ~1km grid, outwards, so the box always covers what was asked. */
+const snapDown = (v) => Number((Math.floor(v / OBSERVATION_GRID_DEGREES) * OBSERVATION_GRID_DEGREES).toFixed(2))
+const snapUp = (v) => Number((Math.ceil(v / OBSERVATION_GRID_DEGREES) * OBSERVATION_GRID_DEGREES).toFixed(2))
+
+/**
+ * A radius around a point -> a bounding box snapped to the ~1km grid.
+ *
+ * Snapping is the whole cache strategy. Two viewports centred 300m apart
+ * produce byte-identical boxes and therefore the same cache key, which is what
+ * stops a continuous pan from being a continuous stream of upstream requests.
+ * The cost is that the box is up to a cell larger than asked for, which only
+ * ever means a few extra observations.
+ */
+function gridBox(lat, lng, radiusKm) {
+  const latSpan = radiusKm / KM_PER_DEGREE_LAT
+  // A degree of longitude shrinks towards the poles. The cosine is floored so
+  // a view centred near a pole widens the box rather than dividing by ~zero.
+  const lngSpan = radiusKm / (KM_PER_DEGREE_LAT * Math.max(Math.cos((lat * Math.PI) / 180), 0.01))
+
+  return {
+    // Clamped rather than wrapped: a box clipped at a pole or the antimeridian
+    // returns slightly fewer observations, which is a better failure than a
+    // box iNaturalist rejects as nonsense.
+    swlat: clamp(snapDown(lat - latSpan), -90, 90),
+    swlng: clamp(snapDown(lng - lngSpan), -180, 180),
+    nelat: clamp(snapUp(lat + latSpan), -90, 90),
+    nelng: clamp(snapUp(lng + lngSpan), -180, 180),
+  }
+}
+
+/**
+ * Plants recently observed in a box around a coordinate, one row per taxon.
+ *
+ * This is the raw layer behind "nearby unknown plants" — it does not know what
+ * the user has already caught, because the service has no idea who is asking.
+ * Filtering to the *unknown* ones happens in the route, against their catches.
+ *
+ * Deduped by taxon on purpose: thirty markers should be thirty species, not the
+ * same lady fern thirty times. The first observation of each taxon wins, and
+ * the page is ordered newest-first, so the coordinates plotted are the most
+ * recent place that species was actually seen.
+ *
+ * Obscured observations are dropped. iNaturalist randomises the coordinates of
+ * sensitive taxa within a ~25km box, so plotting one is a pin pointing at
+ * somewhere the plant demonstrably is not.
+ *
+ * The whole deduped list is cached, not the caller's slice of it, so changing a
+ * marker cap re-slices rather than re-fetches.
+ *
+ * @returns {Promise<object[]>} newest first, one entry per taxon
+ */
+export async function getNearbyObservations(lat, lng, { radiusKm } = {}) {
+  const latitude = Number(lat)
+  const longitude = Number(lng)
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new INaturalistError(`lat and lng must both be numbers (got "${lat}", "${lng}").`, {
+      status: 400,
+      code: 'BAD_REQUEST',
+    })
+  }
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    throw new INaturalistError(
+      `lat must be between -90 and 90 and lng between -180 and 180 (got ${latitude}, ${longitude}).`,
+      { status: 400, code: 'BAD_REQUEST' },
+    )
+  }
+
+  const requested = Number(radiusKm)
+  const radius = clamp(
+    Number.isFinite(requested) && requested > 0 ? requested : DEFAULT_OBSERVATION_RADIUS_KM,
+    1,
+    MAX_OBSERVATION_RADIUS_KM,
+  )
+
+  const box = gridBox(latitude, longitude, radius)
+  const key = `obs:${box.swlat},${box.swlng},${box.nelat},${box.nelng}`
+
+  return cached(
+    key,
+    async () => {
+      const payload = await get('/observations', {
+        ...box,
+        taxon_id: PLANTAE_TAXON_ID,
+        // Research grade only: a community-confirmed identification is the
+        // point. Casual observations are frequently cultivated garden plants
+        // or misidentified, and this layer is telling users what to go find.
+        quality_grade: 'research',
+        photos: 'true',
+        order_by: 'observed_on',
+        order: 'desc',
+        per_page: OBSERVATION_PAGE_SIZE,
+      })
+
+      const seen = new Set()
+      const results = []
+
+      for (const observation of payload.results ?? []) {
+        if (observation.obscured) continue
+
+        const taxon = observation.taxon
+        const taxonId = taxon?.id
+        if (!taxonId || seen.has(taxonId)) continue
+
+        // geojson is [lng, lat] — GeoJSON order, not the lat/lng order every
+        // other coordinate in this codebase travels in.
+        const coordinates = observation.geojson?.coordinates
+        if (!Array.isArray(coordinates) || coordinates.length < 2) continue
+
+        const [obsLng, obsLat] = coordinates.map(Number)
+        if (!Number.isFinite(obsLat) || !Number.isFinite(obsLng)) continue
+
+        seen.add(taxonId)
+        results.push({
+          observationId: observation.id ?? null,
+          taxonId,
+          scientificName: taxon.name ?? null,
+          commonName: taxon.preferred_common_name ?? null,
+          // Drives which icon the map draws. 'species' is the common case;
+          // a genus- or family-level identification gets the vaguer pin.
+          rank: taxon.rank ?? null,
+          lat: obsLat,
+          lng: obsLng,
+          observedOn: observation.observed_on ?? null,
+          defaultPhotoUrl: photoUrl(taxon),
+        })
+      }
+
+      console.info(
+        `[inaturalist] nearby observations: ${payload.results?.length ?? 0} rows -> ` +
+          `${results.length} taxa for ${key}`,
+      )
+      return results
+    },
+    OBSERVATION_CACHE_TTL_MS,
+  )
+}
 
 /**
  * Species recently observed in (or near) a place — the "catchable nearby" list.
