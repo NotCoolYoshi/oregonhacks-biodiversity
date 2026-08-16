@@ -36,16 +36,12 @@ export default function PlantCard({ plant = EMPTY_PLANT }) {
       <div className="bg" aria-hidden="true" />
 
       <div className="plant-card__content">
-        <div className="plant-card__row">
-          <span></span>
-          <strong>{currentPlant.name ?? 'null'}</strong>
-        </div>
-
-          
-
-        <div className="plant-card__row plant-card__row--id">
-          <span>#</span>
-          <strong>{currentPlant.uniqueId ?? 'null'}</strong>
+        <div className="plant-card__bottom">
+          <div className="plant-card__left">
+            <div className="plant-card__name">{currentPlant.name ?? 'null'}</div>
+            <div className="plant-card__id">{currentPlant.uniqueId ?? 'null'}</div>
+          </div>
+          <div className="plant-card__rarity">{rarity}</div>
         </div>
       </div>
     </div>
