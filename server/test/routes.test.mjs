@@ -1146,6 +1146,143 @@ check('a named user with no catches reports zeros',
   JSON.stringify(g.body))
 check('...but still reports their name', g.body.displayName === 'Just Arrived', g.body.displayName)
 
+// ---------------------------------------------------------------------------
+// GET /api/users/:userId/achievements — native and invasive badge state.
+// ---------------------------------------------------------------------------
+
+const getAchievements = async (userId) => {
+  const res = await realFetch(`${base}/api/users/${encodeURIComponent(userId)}/achievements`)
+  return { status: res.status, body: await res.json() }
+}
+
+// This route never looks a taxon up against iNaturalist — it only reads
+// taxon_id and type back out of `catches` — so a synthetic id not present in
+// TAXA is fine, unlike seed()/seedRow() above which both dereference TAXA.
+const seedAchievementRow = (user_id, taxon_id, type, place_id = 10) =>
+  table.push({
+    id: `row_${nextId++}`,
+    user_id,
+    taxon_id,
+    type,
+    place_id,
+    common_name: `Species ${taxon_id}`,
+    scientific_name: `Species ${taxon_id}`,
+    created_at: new Date().toISOString(),
+  })
+
+console.log('\n-- achievements: no catches --')
+resetTable()
+
+let a = await getAchievements('usr_nobody')
+check('unknown user -> 200, not 404', a.status === 200, a.status)
+check('nativeSpeciesCount is 0', a.body.nativeSpeciesCount === 0, a.body.nativeSpeciesCount)
+check('invasiveSpeciesCount is 0', a.body.invasiveSpeciesCount === 0, a.body.invasiveSpeciesCount)
+check('all 7 native badges present', a.body.nativeBadges.length === 7, a.body.nativeBadges.length)
+check('all 4 invasive badges present', a.body.invasiveBadges.length === 4,
+  a.body.invasiveBadges.length)
+check('every native badge starts locked', a.body.nativeBadges.every((b) => b.unlocked === false))
+check('every invasive badge starts locked',
+  a.body.invasiveBadges.every((b) => b.unlocked === false))
+check('native thresholds match the real scheme',
+  JSON.stringify(a.body.nativeBadges.map((b) => b.threshold)) ===
+    JSON.stringify([1, 5, 10, 25, 50, 75, 100]),
+  JSON.stringify(a.body.nativeBadges.map((b) => b.threshold)))
+check('invasive thresholds match the real scheme',
+  JSON.stringify(a.body.invasiveBadges.map((b) => b.threshold)) === JSON.stringify([1, 5, 10, 25]),
+  JSON.stringify(a.body.invasiveBadges.map((b) => b.threshold)))
+check('badge labels match the named scheme',
+  a.body.nativeBadges[0].label === 'First Seed' &&
+    a.body.nativeBadges[6].label === 'Keeper of the Garden' &&
+    a.body.invasiveBadges[0].label === 'First Watch' &&
+    a.body.invasiveBadges[3].label === 'Guardian of the Grove',
+  JSON.stringify([a.body.nativeBadges, a.body.invasiveBadges]))
+
+console.log('\n-- achievements: species counted distinctly, not raw catches --')
+resetTable()
+
+// Same species logged in two places is one entry toward the count, matching
+// GET /api/users/:userId's uniqueSpeciesCount.
+seedAchievementRow('usr_dup', 5001, 'catch', 10)
+seedAchievementRow('usr_dup', 5001, 'catch', 962)
+seedAchievementRow('usr_dup', 5002, 'threat_report', 10)
+seedAchievementRow('usr_dup', 5002, 'threat_report', 962)
+
+a = await getAchievements('usr_dup')
+check('duplicate species across places counts once (native)',
+  a.body.nativeSpeciesCount === 1, a.body.nativeSpeciesCount)
+check('duplicate species across places counts once (invasive)',
+  a.body.invasiveSpeciesCount === 1, a.body.invasiveSpeciesCount)
+
+console.log('\n-- achievements: native and invasive counted independently --')
+resetTable()
+
+seedAchievementRow('usr_split', 5010, 'catch')
+seedAchievementRow('usr_split', 5011, 'catch')
+seedAchievementRow('usr_split', 5012, 'catch')
+
+a = await getAchievements('usr_split')
+check('an all-native user has invasiveSpeciesCount 0', a.body.invasiveSpeciesCount === 0,
+  a.body.invasiveSpeciesCount)
+check('...and every invasive badge stays locked',
+  a.body.invasiveBadges.every((b) => b.unlocked === false))
+check('nativeSpeciesCount reflects the 3 species', a.body.nativeSpeciesCount === 3,
+  a.body.nativeSpeciesCount)
+
+console.log('\n-- achievements: native threshold boundaries --')
+resetTable()
+
+for (let i = 0; i < 4; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch')
+a = await getAchievements('usr_boundary')
+check('4 species: First Seed (1) unlocked, Tender Sprout (5) not yet',
+  a.body.nativeBadges[0].unlocked === true && a.body.nativeBadges[1].unlocked === false,
+  JSON.stringify(a.body.nativeBadges))
+
+seedAchievementRow('usr_boundary', 6004, 'catch') // 5th species
+a = await getAchievements('usr_boundary')
+check('exactly 5 species unlocks Tender Sprout', a.body.nativeBadges[1].unlocked === true,
+  JSON.stringify(a.body.nativeBadges))
+check('...but not Budding Grace (threshold 10)', a.body.nativeBadges[2].unlocked === false,
+  JSON.stringify(a.body.nativeBadges))
+
+for (let i = 5; i < 9; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch') // 9 total
+a = await getAchievements('usr_boundary')
+check('9 species: one short of Budding Grace stays locked',
+  a.body.nativeBadges[2].unlocked === false, a.body.nativeSpeciesCount)
+
+seedAchievementRow('usr_boundary', 6009, 'catch') // 10th species
+a = await getAchievements('usr_boundary')
+check('exactly 10 species unlocks Budding Grace', a.body.nativeBadges[2].unlocked === true,
+  a.body.nativeSpeciesCount)
+
+for (let i = 10; i < 100; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch') // 100 total
+a = await getAchievements('usr_boundary')
+check('exactly 100 species unlocks every native badge',
+  a.body.nativeBadges.every((b) => b.unlocked === true), a.body.nativeSpeciesCount)
+check('nativeSpeciesCount is exactly 100', a.body.nativeSpeciesCount === 100,
+  a.body.nativeSpeciesCount)
+
+console.log('\n-- achievements: invasive threshold boundaries --')
+resetTable()
+
+for (let i = 0; i < 24; i++) seedAchievementRow('usr_threat', 7000 + i, 'threat_report')
+a = await getAchievements('usr_threat')
+check('24 invasive species: Guardian of the Grove (25) still locked',
+  a.body.invasiveBadges[3].unlocked === false, a.body.invasiveSpeciesCount)
+check('...but Warden of the Wild (10) is already unlocked',
+  a.body.invasiveBadges[2].unlocked === true, a.body.invasiveSpeciesCount)
+
+seedAchievementRow('usr_threat', 7024, 'threat_report') // 25th
+a = await getAchievements('usr_threat')
+check('exactly 25 invasive species unlocks Guardian of the Grove',
+  a.body.invasiveBadges[3].unlocked === true, a.body.invasiveSpeciesCount)
+check('every invasive badge is unlocked at 25',
+  a.body.invasiveBadges.every((b) => b.unlocked === true), a.body.invasiveSpeciesCount)
+
+console.log('\n-- achievements: validation --')
+a = await getAchievements('  ')
+check('whitespace-only userId -> 400', a.status === 400, a.status)
+check('...coded BAD_REQUEST', a.body.code === 'BAD_REQUEST', a.body.code)
+
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()
 process.exit(fail === 0 ? 0 : 1)
