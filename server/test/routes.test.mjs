@@ -183,8 +183,31 @@ async function handlePostgrest(url, init) {
     rows = rows.filter((row) => String(row[key]) === wanted)
   }
 
+  // `order=col.asc` / `order=col.desc`. Only a single key, which is all the
+  // routes ask for — without this the list route's "newest first" contract
+  // would be asserted against whatever order the fixtures happened to be
+  // pushed in.
+  const order = url.searchParams.get('order')
+  if (order) {
+    const [column, direction = 'asc'] = order.split('.')
+    const sign = direction.startsWith('desc') ? -1 : 1
+    rows.sort((a, b) => {
+      if (a[column] === b[column]) return 0
+      return (a[column] < b[column] ? -1 : 1) * sign
+    })
+  }
+
   const limit = Number(url.searchParams.get('limit'))
   if (Number.isFinite(limit) && limit > 0) rows = rows.slice(0, limit)
+
+  // Honour `select=` as a projection. Real PostgREST returns only the named
+  // columns; a stub that returns whole rows lets a route claim to withhold a
+  // column while the test sees it anyway.
+  const select = url.searchParams.get('select')
+  if (select && select !== '*') {
+    const columns = select.split(',').map((c) => c.trim()).filter(Boolean)
+    rows = rows.map((row) => Object.fromEntries(columns.map((c) => [c, row[c] ?? null])))
+  }
 
   return json(wantsObject ? (rows[0] ?? null) : rows)
 }
@@ -236,6 +259,11 @@ const post = async (body) => {
 
 const getScore = async (placeId) => {
   const res = await realFetch(`${base}/api/region/${placeId}/score`)
+  return { status: res.status, body: await res.json() }
+}
+
+const listCatches = async (query = '') => {
+  const res = await realFetch(`${base}/api/catches${query}`)
   return { status: res.status, body: await res.json() }
 }
 
@@ -453,6 +481,127 @@ check('empty region trend is flat', r.body.trend.direction === 'flat', r.body.tr
 
 r = await getScore('not-a-place')
 check('non-numeric placeId -> 400', r.status === 400, r.status)
+
+// ---------------------------------------------------------------------------
+// GET /api/catches — the list endpoint behind the map and the dex.
+// ---------------------------------------------------------------------------
+
+// Seeds a row directly, so lat/lng and created_at can be set per row. The
+// score section's seed() fixes both, and this section needs to vary them.
+const seedRow = ({ user_id, taxon_id, type, place_id = 10, lat = null, lng = null, at }) =>
+  table.push({
+    id: `row_${nextId++}`,
+    user_id,
+    taxon_id,
+    type,
+    place_id,
+    place_name: place_id === 10 ? 'Oregon' : 'Lane County, OR',
+    common_name: TAXA[taxon_id].preferred_common_name,
+    scientific_name: TAXA[taxon_id].name,
+    lat,
+    lng,
+    created_at: at,
+  })
+
+console.log('\n-- list catches, empty --')
+resetTable()
+
+let l = await listCatches()
+check('empty table -> 200', l.status === 200, l.status)
+check('empty table returns an empty array', Array.isArray(l.body.catches) && l.body.catches.length === 0,
+  JSON.stringify(l.body.catches))
+check('empty table reports zero totalResults', l.body.totalResults === 0, l.body.totalResults)
+
+l = await listCatches('?placeId=10')
+check('empty result for a filtered place is still 200', l.status === 200, l.status)
+check('...with an empty array, not null', Array.isArray(l.body.catches) && l.body.catches.length === 0)
+
+console.log('\n-- list catches, filters --')
+resetTable()
+
+// usr_1: two rows in place 10, one in place 962.
+// usr_2: one row in place 10.
+seedRow({ user_id: 'usr_1', taxon_id: 126887, type: 'catch', at: '2026-08-01T00:00:00.000Z',
+  lat: 44.05, lng: -123.08 })
+seedRow({ user_id: 'usr_1', taxon_id: 61317, type: 'threat_report', at: '2026-08-03T00:00:00.000Z',
+  lat: 45.51, lng: -122.67 })
+seedRow({ user_id: 'usr_1', taxon_id: 48472, type: 'catch', place_id: 962,
+  at: '2026-08-02T00:00:00.000Z', lat: 44.0, lng: -123.1 })
+seedRow({ user_id: 'usr_2', taxon_id: 58732, type: 'threat_report', at: '2026-08-04T00:00:00.000Z',
+  lat: 42.32, lng: -122.87 })
+
+l = await listCatches()
+check('no filters returns every row', l.body.totalResults === 4, l.body.totalResults)
+check('newest first', l.body.catches[0].taxon_id === 58732, l.body.catches[0].taxon_id)
+check('oldest last', l.body.catches[3].taxon_id === 126887, l.body.catches[3].taxon_id)
+
+l = await listCatches('?userId=usr_1')
+check('userId filter returns only that user', l.body.totalResults === 3, l.body.totalResults)
+check('userId filter spans places', l.body.catches.some((row) => row.taxon_id === 48472))
+check('userId echoed back', l.body.userId === 'usr_1', l.body.userId)
+check('placeId null when not filtered', l.body.placeId === null, l.body.placeId)
+
+l = await listCatches('?placeId=10')
+check('placeId filter returns only that place', l.body.totalResults === 3, l.body.totalResults)
+check('placeId filter spans users',
+  l.body.catches.some((row) => row.taxon_id === 126887) &&
+    l.body.catches.some((row) => row.taxon_id === 58732),
+  JSON.stringify(l.body.catches.map((row) => row.taxon_id)))
+check('the other place is excluded', !l.body.catches.some((row) => row.taxon_id === 48472))
+check('placeId echoed back as a number', l.body.placeId === 10, l.body.placeId)
+check('placeName resolved for the filtered place', l.body.placeName === 'Oregon', l.body.placeName)
+
+l = await listCatches('?userId=usr_1&placeId=10')
+check('both filters AND together', l.body.totalResults === 2, l.body.totalResults)
+check('both filters exclude the other user',
+  !l.body.catches.some((row) => row.taxon_id === 58732))
+check('both filters exclude the other place',
+  !l.body.catches.some((row) => row.taxon_id === 48472))
+
+l = await listCatches('?userId=usr_nobody')
+check('unknown user returns empty, not 404', l.status === 200 && l.body.totalResults === 0,
+  `${l.status} ${l.body.totalResults}`)
+
+console.log('\n-- list catches, row shape --')
+l = await listCatches('?userId=usr_1&placeId=10')
+const row = l.body.catches[0]
+for (const field of ['id', 'taxon_id', 'scientific_name', 'common_name', 'type', 'lat', 'lng',
+  'created_at']) {
+  check(`row carries ${field}`, field in row, JSON.stringify(row))
+}
+check('row does not leak user_id', !('user_id' in row), JSON.stringify(row))
+check('row does not leak photo_url', !('photo_url' in row))
+
+// The map filters these out client-side; the endpoint must not do it for it,
+// or the dex silently loses every catch logged without geolocation.
+console.log('\n-- list catches, null coordinates are still returned --')
+resetTable()
+
+seedRow({ user_id: 'usr_1', taxon_id: 126887, type: 'catch', at: '2026-08-01T00:00:00.000Z',
+  lat: 44.05, lng: -123.08 })
+seedRow({ user_id: 'usr_1', taxon_id: 61317, type: 'threat_report', at: '2026-08-02T00:00:00.000Z' })
+seedRow({ user_id: 'usr_1', taxon_id: 48472, type: 'catch', at: '2026-08-03T00:00:00.000Z' })
+
+l = await listCatches('?userId=usr_1')
+check('rows with null lat/lng are returned', l.body.totalResults === 3, l.body.totalResults)
+check('two of them have no coordinates',
+  l.body.catches.filter((r) => r.lat === null && r.lng === null).length === 2,
+  JSON.stringify(l.body.catches.map((r) => r.lat)))
+check('the located row survives alongside them',
+  l.body.catches.some((r) => r.lat === 44.05), JSON.stringify(l.body.catches.map((r) => r.lat)))
+
+l = await listCatches('?placeId=10')
+check('null coordinates survive the placeId filter too', l.body.totalResults === 3,
+  l.body.totalResults)
+
+console.log('\n-- list catches, validation --')
+l = await listCatches('?placeId=not-a-place')
+check('non-numeric placeId -> 400', l.status === 400, l.status)
+check('...coded BAD_REQUEST', l.body.code === 'BAD_REQUEST', l.body.code)
+l = await listCatches('?placeId=0')
+check('placeId=0 -> 400', l.status === 400, l.status)
+l = await listCatches('?placeId=')
+check('empty placeId is treated as absent, not invalid', l.status === 200, l.status)
 
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()

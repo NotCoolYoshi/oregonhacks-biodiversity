@@ -422,6 +422,78 @@ router.post('/catches', async (req, res, next) => {
 })
 
 /**
+ * GET /api/catches?userId=&placeId=
+ * Lists recorded catches and threat reports, newest first.
+ *
+ * Both filters are optional and AND together when both are given:
+ *   (none)                    every row, capped at SCAN_LIMIT
+ *   ?userId=usr_1             one user's history, anywhere  -> the dex
+ *   ?placeId=10               everything logged in a place  -> the map
+ *   ?userId=usr_1&placeId=10  one user's history in a place
+ *
+ * Rows come back in the database's own snake_case rather than the camelCase
+ * POST /catches responds with. This is a projection of table rows, and the
+ * client renders them as-is; translating would buy nothing but a mapping layer
+ * to keep in sync.
+ *
+ * Rows with a null lat/lng are included. A catch recorded without geolocation
+ * is still a real observation and still belongs in the dex — deciding what is
+ * mappable is the map's job, not this endpoint's.
+ *
+ * Index note: the filters and the sort are shaped to match the indexes in
+ * schema.sql — catches_user_created_idx (user_id, created_at desc) covers the
+ * userId form including the ORDER BY, and catches_place_id_idx covers placeId.
+ */
+router.get('/catches', async (req, res, next) => {
+  if (!requireDatabase(res)) return
+
+  const userId = String(req.query.userId ?? '').trim()
+
+  // Distinguish "not supplied" from "supplied but junk". `?placeId=abc` is a
+  // client bug worth a 400; silently serving every place would hide it.
+  const placeIdRaw = req.query.placeId
+  const hasPlaceId = placeIdRaw != null && String(placeIdRaw).trim() !== ''
+  const placeId = Number(placeIdRaw)
+
+  if (hasPlaceId && (!Number.isFinite(placeId) || placeId <= 0)) {
+    return res.status(400).json({
+      error: `placeId must be a positive number (got "${placeIdRaw}").`,
+      code: 'BAD_REQUEST',
+    })
+  }
+
+  try {
+    const sb = getSupabase()
+
+    let query = sb
+      .from('catches')
+      .select('id, taxon_id, scientific_name, common_name, type, lat, lng, created_at')
+
+    if (userId) query = query.eq('user_id', userId)
+    if (hasPlaceId) query = query.eq('place_id', placeId)
+
+    // Same guard rail as the score route: a cap, not pagination. If a single
+    // place ever exceeds it this needs a real cursor.
+    const { data: rows, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(SCAN_LIMIT)
+
+    if (error) throw toDatabaseError(error)
+
+    res.json({
+      userId: userId || null,
+      placeId: hasPlaceId ? placeId : null,
+      placeName: hasPlaceId ? placeName(placeId) : null,
+      totalResults: rows.length,
+      catches: rows,
+      source: 'supabase',
+    })
+  } catch (err) {
+    handleRouteError(err, 'catches/list', res, next)
+  }
+})
+
+/**
  * GET /api/region/:placeId/score
  * Aggregates catches into a regional biodiversity health score (0-100).
  */

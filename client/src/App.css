@@ -1,7 +1,14 @@
 .app {
+  /* #root is a column flex container, and an auto cross-axis margin cancels
+     the default `align-items: stretch`. Without this the box shrink-wraps its
+     content to ~305px and max-width never comes into play — every view renders
+     in a narrow column. `margin: 0 auto` still does the centring once the box
+     is full width and max-width caps it. */
+  width: 100%;
   max-width: 960px;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
+  box-sizing: border-box;
   text-align: left;
 }
 

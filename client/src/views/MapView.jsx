@@ -3,68 +3,25 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+import { getCatches } from '../api'
+
 // Rough center of Oregon — swap for the user's geolocation later.
 const DEFAULT_CENTER = [44.0, -120.5]
 const DEFAULT_ZOOM = 7
 
-// ---------------------------------------------------------------------------
-// TEMPORARY PLACEHOLDER DATA — delete this block when the real endpoint lands.
-//
-// There is no GET catches route on the server yet (api.js only writes them, via
-// createCatch). Until there is, `loadCatches` below hands back this fixed list
-// so the map is visually testable. Shapes match the `catches` table columns the
-// map cares about: { id, taxon_id, common_name, type, lat, lng }.
-// ---------------------------------------------------------------------------
-const PLACEHOLDER_CATCHES = [
-  {
-    id: 'placeholder-1',
-    taxon_id: 126887,
-    common_name: 'Oregon grape',
-    type: 'catch',
-    lat: 44.0521,
-    lng: -123.0868, // Eugene
-  },
-  {
-    id: 'placeholder-2',
-    taxon_id: 61317,
-    common_name: 'Armenian Blackberry',
-    type: 'threat_report',
-    lat: 45.5152,
-    lng: -122.6784, // Portland
-  },
-  {
-    id: 'placeholder-3',
-    taxon_id: 48256,
-    common_name: 'Douglas-fir',
-    type: 'catch',
-    lat: 44.6365,
-    lng: -124.0535, // Newport
-  },
-  {
-    id: 'placeholder-4',
-    taxon_id: 48538,
-    common_name: 'Scotch Broom',
-    type: 'threat_report',
-    lat: 42.3265,
-    lng: -122.8756, // Medford
-  },
-  {
-    id: 'placeholder-5',
-    taxon_id: 48227,
-    common_name: 'bigleaf maple',
-    type: 'catch',
-    lat: 44.0582,
-    lng: -121.3153, // Bend
-  },
-]
+// Every region in this app is Oregon for now, same as PhotoCapture's PLACE_ID.
+// There is no place picker to build against yet.
+const PLACE_ID = 10
 
 /**
- * The one place the map gets its data. Swap the body for the real call —
- * something like `getCatches(PLACE_ID)` in api.js — and nothing else in this
- * file needs to change. Async already, so the loading state stays honest.
+ * The one place the map gets its data.
+ *
+ * Scoped to the place, not to the current user: the map answers "what has been
+ * found here", so another user's sighting belongs on it. The dex is the
+ * per-user view, and it passes userId to the same endpoint.
  */
 async function loadCatches() {
-  return PLACEHOLDER_CATCHES
+  return getCatches({ placeId: PLACE_ID })
 }
 
 // ---------------------------------------------------------------------------
@@ -116,15 +73,27 @@ function CatchMarkers({ catches }) {
 export default function MapView() {
   const [catches, setCatches] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
 
-    loadCatches().then((rows) => {
-      if (cancelled) return
-      setCatches(rows)
-      setLoading(false)
-    })
+    loadCatches()
+      .then((rows) => {
+        if (!cancelled) setCatches(rows ?? [])
+      })
+      .catch((err) => {
+        // Now that this is a real request it can fail, and an unhandled
+        // rejection would leave the map stuck on "Loading catches…" forever.
+        if (cancelled) return
+        setError(
+          err?.response?.data?.error ??
+            'Could not reach the server. If you are running this locally, check it is up on port 5001.',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
 
     return () => {
       cancelled = true
@@ -140,7 +109,9 @@ export default function MapView() {
 
       {loading && <p className="capture-muted">Loading catches…</p>}
 
-      {!loading && catches.length === 0 && (
+      {!loading && error && <p className="capture-note">{error}</p>}
+
+      {!loading && !error && catches.length === 0 && (
         <p className="capture-note">No catches for this place yet — go catch something.</p>
       )}
 

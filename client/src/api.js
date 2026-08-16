@@ -38,6 +38,20 @@ export const getNearby = (placeId, params) =>
 /** POST /api/catches — record a `catch` or a `threat_report`. */
 export const createCatch = (body) => api.post('/api/catches', body).then((r) => r.data)
 
+/**
+ * GET /api/catches?userId=&placeId= — recorded catches, newest first.
+ *
+ * Both params are optional and AND together: pass `placeId` for the map's
+ * "everything logged here", `userId` for the dex's "everything I have found".
+ * Rows come back in the database's snake_case (taxon_id, common_name, lat, …),
+ * unlike createCatch's camelCase response.
+ *
+ * Rows with a null lat/lng are included — callers that plot them are the ones
+ * responsible for skipping the ones with no coordinates.
+ */
+export const getCatches = (params) =>
+  api.get('/api/catches', { params }).then((r) => r.data.catches)
+
 /** GET /api/region/:placeId/score — aggregated regional biodiversity health score. */
 export const getRegionScore = (placeId) =>
   api.get(`/api/region/${placeId}/score`).then((r) => r.data)
