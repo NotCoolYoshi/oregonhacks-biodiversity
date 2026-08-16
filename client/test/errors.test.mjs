@@ -6,7 +6,11 @@
 // bad server key must not be blamed on their photo. Those are the two ways
 // this mapping fails silently, so both are asserted directly.
 
-import { describeIdentifyError, describeSubmitError } from '../src/errors.js'
+import {
+  describeIdentifyError,
+  describeSubmitError,
+  describeRetriesExhausted,
+} from '../src/errors.js'
 
 let pass = 0
 let fail = 0
@@ -100,6 +104,23 @@ check('network guidance mentions the server being down',
 // Express rejects an oversized body before the route runs, so there is no code.
 check('a bare 413 is still recognised as an oversized photo',
   describeIdentifyError(axiosError(413, ''), 'leaf').code === 'IMAGE_TOO_LARGE')
+
+console.log('\n-- the retry ladder giving up --')
+
+// Reached only when all five photos were rejected outright, so no candidate was
+// ever returned to settle for. See handleWeakAttempt in views/PhotoCapture.jsx.
+const exhaustedLeaf = describeRetriesExhausted('leaf', 5)
+const exhaustedFlower = describeRetriesExhausted('flower', 5)
+
+check('exhaustion says how many photos were tried',
+  /5 photos/.test(exhaustedLeaf.title), exhaustedLeaf.title)
+check('exhaustion is distinct from a single low-confidence result',
+  exhaustedLeaf.title !== leafAdvice.title, exhaustedLeaf.title)
+check('exhaustion still offers a fresh start', exhaustedLeaf.canRetry === true)
+check('a weak organ is told to try flower or fruit here too',
+  /flower or\s+fruit/i.test(exhaustedLeaf.guidance), exhaustedLeaf.guidance)
+check('a flower photo is not told to photograph the flower',
+  !/flower or\s+fruit/i.test(exhaustedFlower.guidance), exhaustedFlower.guidance)
 
 console.log('\n-- catch submission failures --')
 

@@ -24,10 +24,22 @@ const PHOTO = resolve(HERE, 'fixtures/scotch-broom.jpg')
 // from iNaturalist. It identifies at ~0.24, comfortably over the server's 0.1
 // MIN_CONFIDENCE floor, and Scotch broom is introduced in Oregon — so the flow
 // exercises the threat_report branch as well as the catch branch.
+//
+// That 0.24 also sits well under the client's 0.75 auto-proceed bar, so every
+// run here walks the whole retry ladder rather than committing on the first
+// photo: four "try another photo" screens, then attempt 5 settles for the best
+// result seen. Deliberately not swapped for a >=0.75 fixture — this is the path
+// a real user with a real plant actually takes, and it is worth covering.
+// The cost is five Pl@ntNet calls per identify, against a 500/day free tier;
+// see MAX_ATTEMPTS below if that ever becomes the binding constraint.
 const EXPECTED_SPECIES = 'Cytisus scoparius'
 const EXPECTED_TYPE = 'threat_report'
 const EXPECTED_POINTS = 25
 const PLACE_ID = 10
+
+// MAX_ATTEMPTS in client/src/views/PhotoCapture.jsx. The ladder stops here and
+// proceeds with whatever scored highest.
+const MAX_ATTEMPTS = 5
 
 // Eugene, Oregon.
 const OREGON = { latitude: 44.0521, longitude: -123.0868 }
@@ -187,23 +199,43 @@ const statesSeen = (page) => page.evaluate(() => window.__states ?? [])
 // Flow steps
 // ---------------------------------------------------------------------------
 
+// '/' is the home dashboard; capture lives on its own route.
 async function chooseOrganAndPhoto(page, organ) {
-  await page.goto('/')
+  await page.goto('/capture')
   await expect(page.getByRole('heading', { name: 'Photo Capture' })).toBeVisible()
 
   await page.locator(`input[name="organ"][value="${organ}"]`).check()
   await page.locator('input[type="file"]').setInputFiles(PHOTO)
 }
 
-async function identify(page) {
-  await page.getByRole('button', { name: 'Identify this plant' }).click()
-  await expect(page.getByRole('heading', { name: 'Is it one of these?' })).toBeVisible({
-    timeout: 90_000,
-  })
-}
+const retryHeading = (page) => page.getByRole('heading', { name: /Not confident enough/ })
 
-async function pickTopCandidate(page) {
-  await page.locator('.capture-candidates button').first().click()
+// The status-preview screen titles itself with the species it settled on.
+const speciesHeading = (page) => page.getByRole('heading', { name: EXPECTED_SPECIES })
+
+/**
+ * Drive identification until the app commits to a species, feeding it the same
+ * photo each time it asks for a better one.
+ *
+ * There is no candidate list to click any more: the app either clears 0.75 and
+ * proceeds by itself, or spends the ladder and proceeds with its best result.
+ * Both outcomes land on status-preview, so this returns the attempt it took to
+ * get there — 1 for a confident photo, MAX_ATTEMPTS for the fixture.
+ */
+async function identify(page) {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await page.getByRole('button', { name: 'Identify this plant' }).click()
+
+    // Either screen is a valid landing; racing them avoids assuming which.
+    await expect(retryHeading(page).or(speciesHeading(page))).toBeVisible({ timeout: 90_000 })
+    if (await speciesHeading(page).isVisible()) return attempt
+
+    await page.getByRole('button', { name: 'Take another photo' }).click()
+    await expect(page.getByRole('heading', { name: 'Photo Capture' })).toBeVisible()
+    await page.locator('input[type="file"]').setInputFiles(PHOTO)
+  }
+
+  throw new Error(`never reached a species after ${MAX_ATTEMPTS} attempts`)
 }
 
 /** Waits out the status lookup, then submits. Returns the button's label. */
@@ -242,7 +274,6 @@ test.describe.serial('PhotoCapture against the real stack', () => {
     await expect(page.getByText(/Location ready/)).toBeVisible({ timeout: 30_000 })
 
     await identify(page)
-    await pickTopCandidate(page)
     await confirmCatch(page)
     await expect(page.locator('.capture h2')).toContainText(/New species|Threat reported|Caught/, {
       timeout: 90_000,
@@ -272,7 +303,6 @@ test.describe.serial('PhotoCapture against the real stack', () => {
     const noticeShown = await noLocationNotice.isVisible().catch(() => false)
 
     await identify(page)
-    await pickTopCandidate(page)
     await confirmCatch(page)
 
     // waitFor, not isVisible: isVisible is an immediate check and would report
@@ -337,15 +367,11 @@ test.describe.serial('PhotoCapture against the real stack', () => {
     })
 
     await chooseOrganAndPhoto(page, 'flower')
-    await identify(page)
+    const attemptsTaken = await identify(page)
 
-    // candidates
-    const candidates = page.locator('.capture-candidates button')
-    expect(await candidates.count(), 'ranked candidates rendered').toBeGreaterThan(0)
-    await expect(candidates.first()).toContainText(EXPECTED_SPECIES)
-    await expect(candidates.first()).toContainText('%')
-
-    await pickTopCandidate(page)
+    // The fixture cannot clear 0.75, so the ladder must have run to the end and
+    // settled rather than committing early.
+    expect(attemptsTaken, 'a sub-threshold photo spends the whole ladder').toBe(MAX_ATTEMPTS)
 
     // status-preview
     const verdict = page.locator('.capture-verdict').first()
@@ -368,7 +394,14 @@ test.describe.serial('PhotoCapture against the real stack', () => {
     expect(states).toContain('Photo Capture')
     expect(states, 'identifying state rendered').toContain('Identifying…')
     expect(states, 'submitting state rendered').toContain('Saving…')
-    expect(states).toContain('Is it one of these?')
+    expect(
+      states.some((state) => state.startsWith('Not confident enough')),
+      'the retry screen stood in for the old candidate list',
+    ).toBe(true)
+    expect(
+      states.some((state) => state === 'Is it one of these?'),
+      'manual candidate selection is gone',
+    ).toBe(false)
     expect(states.some((state) => state.includes('New species'))).toBe(true)
     // status-preview renders the scientific name as its heading.
     expect(states.some((state) => state.includes(EXPECTED_SPECIES))).toBe(true)
@@ -404,9 +437,10 @@ test.describe.serial('PhotoCapture against the real stack', () => {
       )
       await page.getByRole('button', { name: 'Identify this plant' }).click()
       const response = await responsePromise
-      await expect(page.getByRole('heading', { name: 'Is it one of these?' })).toBeVisible({
-        timeout: 90_000,
-      })
+      // One call only — this check is about the request and the payload, so it
+      // does not need the ladder run to completion. The fixture scores under
+      // 0.75, so the first attempt always lands on the retry screen.
+      await expect(retryHeading(page)).toBeVisible({ timeout: 90_000 })
 
       const request = response.request()
       const payload = await response.json()
@@ -424,7 +458,9 @@ test.describe.serial('PhotoCapture against the real stack', () => {
     const flower = await runWith('flower')
 
     // Back to idle without submitting — no database write needed for this one.
-    await page.getByRole('button', { name: 'None of these — retake' }).click()
+    // "Start over" rather than "Take another photo": the second organ must run
+    // against a fresh attempt counter, not attempt 2 of the first ladder.
+    await page.getByRole('button', { name: 'Start over' }).click()
     await expect(page.getByRole('heading', { name: 'Photo Capture' })).toBeVisible()
 
     const leaf = await runWith('leaf')
@@ -491,7 +527,6 @@ test.describe.serial('PhotoCapture against the real stack', () => {
 
     await chooseOrganAndPhoto(page, 'flower')
     await identify(page)
-    await pickTopCandidate(page)
     await confirmCatch(page)
 
     await expect(page.getByRole('heading', { name: 'Already in your dex' })).toBeVisible({
