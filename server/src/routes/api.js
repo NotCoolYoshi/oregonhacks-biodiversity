@@ -7,6 +7,7 @@ import {
   getTaxonStatus,
   getPhenology,
   getNearbySpecies,
+  getNearbyObservations,
   getEstablishmentMeans,
   isNativeMeans,
   resolvePlaceFromCoords,
@@ -444,6 +445,101 @@ router.get('/region/:placeId/nearby', async (req, res, next) => {
     })
   } catch (err) {
     handleRouteError(err, 'region/nearby', res, next)
+  }
+})
+
+/**
+ * The most markers this endpoint will ever hand back for one viewport.
+ *
+ * A hard ceiling rather than a default the client can raise. It is doing two
+ * jobs at once — keeping a zoomed-out view from asking iNaturalist for a
+ * continent's worth of pins, and keeping the map from rendering a thousand
+ * Leaflet markers — and a limit a caller can talk its way past does neither.
+ */
+const NEARBY_MARKER_CAP = 30
+
+/**
+ * The taxon ids this user has already caught.
+ *
+ * Degrades to "none" rather than failing. This powers the *unknown* in "nearby
+ * unknown plants", so losing it shows the user a few species they have already
+ * found — a worse layer, not a broken one, and much better than no layer at
+ * all. `hasDatabase()` being false is the ordinary case for a teammate running
+ * without Supabase keys, so it is not even a warning.
+ */
+async function caughtTaxonIds(userId) {
+  if (!userId || !hasDatabase()) return new Set()
+
+  try {
+    const { data, error } = await getSupabase()
+      .from('catches')
+      .select('taxon_id')
+      .eq('user_id', userId)
+      .not('taxon_id', 'is', null)
+      .limit(SCAN_LIMIT)
+
+    if (error) throw toDatabaseError(error)
+    return new Set(data.map((row) => Number(row.taxon_id)).filter(Number.isFinite))
+  } catch (err) {
+    console.warn(`[observations/nearby] could not read catches for ${userId}: ${err.message}`)
+    return new Set()
+  }
+}
+
+/**
+ * GET /api/observations/nearby?lat=&lng=&radius=&userId=&limit=
+ * Plants observed near a coordinate that this user has *not* caught yet.
+ *
+ * The map's additive layer: what is out there to go find. Never load-bearing —
+ * the client drops the layer on any failure rather than surfacing an error, so
+ * this route's job when things go wrong is to say so honestly and let the
+ * client decide, not to paper over it with an empty 200.
+ *
+ * Cost control lives in three places and all three matter: the ~1km grid cache
+ * in getNearbyObservations() (24h, so a pan over covered ground is free), the
+ * client's settle-debounce (one request per pause, not per frame), and
+ * NEARBY_MARKER_CAP below.
+ */
+router.get('/observations/nearby', async (req, res, next) => {
+  const { lat, lng } = req.query
+
+  if (lat == null || lng == null) {
+    return res.status(400).json({ error: 'lat and lng are required', code: 'BAD_REQUEST' })
+  }
+
+  const userId = String(req.query.userId ?? '').trim()
+  const requestedLimit = Number(req.query.limit)
+  const limit = Math.min(
+    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : NEARBY_MARKER_CAP,
+    NEARBY_MARKER_CAP,
+  )
+
+  try {
+    // Both at once: the catch list is a database read and the observations are
+    // an upstream call (usually a cache hit), and neither needs the other.
+    const [observations, caught] = await Promise.all([
+      getNearbyObservations(lat, lng, { radiusKm: req.query.radius }),
+      caughtTaxonIds(userId),
+    ])
+
+    const unknown = observations.filter((observation) => !caught.has(observation.taxonId))
+
+    res.json({
+      // Echoed back so the client can drop a response that landed after the
+      // user has already panned somewhere else.
+      lat: Number(lat),
+      lng: Number(lng),
+      // How many of the nearby species this user has already found. The
+      // difference between "nothing grows here" and "you've caught it all",
+      // which the empty layer alone cannot say.
+      excludedCaught: observations.length - unknown.length,
+      totalResults: unknown.length,
+      capped: unknown.length > limit,
+      results: unknown.slice(0, limit),
+      source: 'iNaturalist',
+    })
+  } catch (err) {
+    handleRouteError(err, 'observations/nearby', res, next)
   }
 })
 
