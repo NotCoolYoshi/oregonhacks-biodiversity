@@ -16,11 +16,21 @@ export function groupBySpecies(rows) {
   for (const row of rows) {
     const existing = bySpecies.get(row.taxon_id)
     if (!existing) {
-      bySpecies.set(row.taxon_id, { ...row, sightings: 1, firstSeen: row.created_at })
+      bySpecies.set(row.taxon_id, {
+        ...row,
+        sightings: 1,
+        firstSeen: row.created_at,
+        // Every underlying row, kept rather than collapsed away. The card face
+        // only needs the count, but the expanded view needs each sighting's own
+        // photo, place and date — and re-deriving that by filtering the raw
+        // list would mean two definitions of "this species' catches".
+        catches: [row],
+      })
       continue
     }
 
     existing.sightings += 1
+    existing.catches.push(row)
     // Parsed rather than compared as strings: timestamptz can come back with
     // an offset ("+00:00") as well as a "Z", and those two spellings of the
     // same instant do not sort against each other lexicographically.

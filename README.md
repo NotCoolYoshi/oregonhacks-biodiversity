@@ -94,7 +94,9 @@ other two.
 ```
 client/          Vite + React app
   src/api.js       every server call, in one place
-  src/views/       PhotoCapture, CatalogueView, MapView, SocialView
+  src/image.js     canvas resize + JPEG re-encode, before any upload
+  src/sighting.js  season, distance, and coordinate helpers
+  src/views/       PhotoCapture, CatalogueView, SpeciesDetail, MapView, SocialView
 server/          Node + Express proxy layer
   src/index.js     app setup, CORS, dotenv
   src/routes/      the six API routes

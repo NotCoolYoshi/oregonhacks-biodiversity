@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { getCatches } from '../api'
 import { groupBySpecies } from '../catalogue'
 import { getUserId } from '../session'
+import SpeciesDetail from './SpeciesDetail'
 
 // TODO: the "catchable nearby" list from GET /api/region/:placeId/nearby, to
 // show un-caught silhouettes alongside what has been found. Phenology
@@ -34,25 +35,35 @@ const formatDate = (iso) =>
  *
  * A <button> rather than a div with a click handler: the whole point is that it
  * is activatable, and that has to reach the keyboard and the a11y tree. Both
- * faces stay in the DOM, so `aria-pressed` plus real text on each side is
- * enough — no aria-live, no swapping content out from under a screen reader.
+ * faces stay in the DOM, so real text on each side is enough — no aria-live, no
+ * swapping content out from under a screen reader.
+ *
+ * The flip is now hover/focus decoration rather than the click action; clicking
+ * opens the full view. Two different things on one tap was always going to lose,
+ * and the back face only ever held three lines the expanded view now covers.
  */
-function SpeciesCard({ species }) {
-  const [flipped, setFlipped] = useState(false)
+function SpeciesCard({ species, onOpen }) {
   const isThreat = species.type === 'threat_report'
+  const photo = species.catches.find((c) => c.photo_url)?.photo_url ?? null
 
   return (
     <button
       type="button"
-      className={`species-card${flipped ? ' is-flipped' : ''}${isThreat ? ' is-threat' : ''}`}
-      aria-pressed={flipped}
-      onClick={() => setFlipped((f) => !f)}
+      className={`species-card${isThreat ? ' is-threat' : ''}`}
+      onClick={onOpen}
     >
       <span className="species-card-inner">
         <span className="species-face species-front">
-          <span className="species-icon" aria-hidden="true">
-            {isThreat ? '⚠️' : '🌿'}
-          </span>
+          {/* The user's own photo when there is one, which is the entire
+              appeal of a collection. The emoji stands in for catches logged
+              before photo storage existed. */}
+          {photo ? (
+            <span className="species-thumb" style={{ backgroundImage: `url(${photo})` }} />
+          ) : (
+            <span className="species-icon" aria-hidden="true">
+              {isThreat ? '⚠️' : '🌿'}
+            </span>
+          )}
           <span className="species-name">
             {species.common_name ?? species.scientific_name}
           </span>
@@ -102,15 +113,27 @@ function MilestoneBar({ milestone, count }) {
 
 export default function CatalogueView() {
   const [rows, setRows] = useState([])
+  // Everyone's catches, for the expanded view's "nearby threat reports". Same
+  // endpoint the map reads, unfiltered — no new route for data already served.
+  const [allCatches, setAllCatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [openTaxonId, setOpenTaxonId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
 
-    getCatches({ userId: getUserId() })
-      .then((data) => {
-        if (!cancelled) setRows(data ?? [])
+    Promise.all([
+      getCatches({ userId: getUserId() }),
+      // Only feeds the nearby-threats list inside a card, so a failure here
+      // costs one section of one dialog. Resolving to [] keeps it from taking
+      // the catalogue down with it.
+      getCatches().catch(() => []),
+    ])
+      .then(([mine, everyone]) => {
+        if (cancelled) return
+        setRows(mine ?? [])
+        setAllCatches(everyone ?? [])
       })
       .catch((err) => {
         if (cancelled) return
@@ -128,8 +151,12 @@ export default function CatalogueView() {
     }
   }, [])
 
+  const closeDetail = useCallback(() => setOpenTaxonId(null), [])
+
   const species = groupBySpecies(rows)
   const caught = species.filter((s) => s.type !== 'threat_report').length
+  const open = species.find((s) => s.taxon_id === openTaxonId) ?? null
+  const ownIds = new Set(rows.map((row) => row.id))
 
   return (
     <div className="catalogue">
@@ -146,13 +173,30 @@ export default function CatalogueView() {
 
       {species.length > 0 && (
         <>
-          <p className="capture-muted">Tap a card to see the details.</p>
+          <p className="capture-muted">Tap a card to see every sighting.</p>
           <div className="species-grid">
             {species.map((s) => (
-              <SpeciesCard key={s.taxon_id} species={s} />
+              <SpeciesCard
+                key={s.taxon_id}
+                species={s}
+                onOpen={() => setOpenTaxonId(s.taxon_id)}
+              />
             ))}
           </div>
         </>
+      )}
+
+      {/* Keyed by species so switching cards remounts rather than reuses —
+          each one fetches its own status, and a stale one showing under a new
+          name is worse than a second spinner. */}
+      {open && (
+        <SpeciesDetail
+          key={open.taxon_id}
+          species={open}
+          allCatches={allCatches}
+          ownIds={ownIds}
+          onClose={closeDetail}
+        />
       )}
 
       <section className="catalogue-section">

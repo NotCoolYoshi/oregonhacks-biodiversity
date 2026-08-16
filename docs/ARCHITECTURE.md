@@ -28,6 +28,25 @@ OregonHacks 2026 · Nature + Tech · team of 3
 The client is deliberately split down the middle so two people can work in it at
 once without colliding.
 
+Tapping a species card opens `SpeciesDetail` — every sighting of that species
+with its own photo, place and season, the native/invasive verdict, conservation
+status, and other users' threat reports within 25km. It is a native `<dialog>`
+opened with `showModal()`, which brings Escape, focus handling, an inert
+background and a real `::backdrop`; a `position: fixed` div would have to
+reimplement all four. The card's flip moved to hover/focus, since one tap
+cannot both flip and open.
+
+Two things there are deliberately **not** shown as data:
+
+- **Weather at time of catch.** Nothing captures it at submission, so there is
+  nothing to display and nothing to backfill. Season *is* shown, derived from
+  the stored date and (via latitude) hemisphere — a March catch in Sydney is
+  autumn. Live weather would need a new API integration and a column.
+- **Rare / common banding.** No thresholds exist anywhere in this codebase, so
+  the card says "not calibrated" rather than inventing a scale that would read
+  as authoritative. iNaturalist's actual conservation assessment is separate,
+  real, and shown when it exists.
+
 **Catalogue / catch UI** (`PhotoCapture`, `CatalogueView`) is the game loop. The user
 photographs a plant, the app identifies it, and the result becomes either a
 **catch** (species is native to the region) or a **threat report** (species is
