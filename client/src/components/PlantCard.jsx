@@ -1,9 +1,9 @@
-import './PlantCard.css'
+import '../css/PlantCard.css'
 
 const EMPTY_PLANT = {
   name: null,
-  scientificName: null,
   uniqueId: null,
+  photoUrl: null,
 }
 
 export default function PlantCard({ plant = EMPTY_PLANT }) {
@@ -16,17 +16,14 @@ export default function PlantCard({ plant = EMPTY_PLANT }) {
 
       <div className="plant-card__content">
         <div className="plant-card__row">
-          <span>Name:</span>
+          <span>:</span>
           <strong>{currentPlant.name ?? 'null'}</strong>
         </div>
 
-        <div className="plant-card__row">
-          <span>Scientific name:</span>
-          <strong>{currentPlant.scientificName ?? 'null'}</strong>
-        </div>
+          
 
         <div className="plant-card__row plant-card__row--id">
-          <span># (Unique ID)</span>
+          <span>#</span>
           <strong>{currentPlant.uniqueId ?? 'null'}</strong>
         </div>
       </div>
