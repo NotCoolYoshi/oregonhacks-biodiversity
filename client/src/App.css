@@ -677,10 +677,24 @@
 /* ---------------------------------------------------------------------------
    Map markers
 
-   Green circle = catch, orange diamond = threat report. Shape carries the
-   distinction as well as colour, so the two stay tellable apart when the map
-   tiles are busy or the viewer cannot separate the hues.
+   Deep-green circle = catch, deep-green diamond = threat report, with a species
+   glyph inside each. Shape carries the catch/threat distinction as well as
+   colour, so the two stay tellable apart when the map tiles are busy or the
+   viewer cannot separate the hues.
+
+   Catch and threat markers are drawn as SVG in markerIcons.js — frame, glyph,
+   halo and all — so almost nothing about them is stylable from here, which is
+   the point: an SVG rotates its own diamond internally and never touches the
+   CSS `transform` that Leaflet needs for positioning.
    --------------------------------------------------------------------------- */
+
+/* The SVG is the marker. No box model of its own, so it cannot shift the
+   artwork off the anchor Leaflet computed for it. */
+.map-pin-catch-icon svg,
+.map-pin-threat-icon svg,
+.map-legend-mark svg {
+  display: block;
+}
 
 /* Never put `transform` on .map-pin itself — Leaflet owns that property for
    marker positioning. The shape lives on the inner span. */
@@ -692,19 +706,6 @@
   height: 100%;
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-}
-
-.map-pin-catch .map-pin-shape,
-.map-swatch-catch {
-  background: var(--color-native);
-  border-radius: 50%;
-}
-
-.map-pin-threat .map-pin-shape,
-.map-swatch-threat {
-  background: var(--color-threat);
-  border-radius: 2px;
-  transform: rotate(45deg);
 }
 
 /* Nearby unknown plants: hollow and grey, so they read as absence against the
@@ -778,11 +779,38 @@
   flex: 1 1 12rem;
 }
 
+/* Two rows: what the frames mean, then what the glyphs mean. Both wrap, because
+   six categories do not fit a phone on one line and a legend that scrolls
+   sideways is a legend nobody reads. */
 .map-legend {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   margin-top: 0.6rem;
+}
+
+.map-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.85rem;
+  margin: 0 0 0.3rem;
+}
+
+.map-legend-row:last-child {
+  margin-bottom: 0;
+}
+
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+/* Half size. The map wants a marker big enough to carry a glyph; a paragraph
+   wants something that sits on the line without pushing it apart. */
+.map-legend-mark svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 .map-swatch {

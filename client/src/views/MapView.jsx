@@ -6,6 +6,8 @@ import 'leaflet/dist/leaflet.css'
 
 import { getCatches, getRegionScore, resolvePlace, getNearbyObservations } from '../api'
 import { getUserId } from '../session'
+import { taxonToIconCategory } from '../taxonCategory'
+import { categoryIcon, legendSvg, LEGEND_CATEGORIES } from '../markerIcons'
 
 // Where the map opens when it has nothing better: the whole world, which is
 // honest about knowing nothing. It used to be the middle of Oregon, which was
@@ -82,6 +84,12 @@ function chooseView({ position, catches }) {
 // Leaflet positions markers by writing `transform: translate3d(...)` onto that
 // div, so any `transform` in our own CSS would replace it and pile every marker
 // onto the pane's top-left corner.
+//
+// Catches and threat reports no longer come through here — they carry a species
+// glyph now and are drawn as SVG in markerIcons.js. This is the nearby-unknown
+// treatment only, which stays a plain CSS shape on purpose: those pins say
+// "something is here that you have not caught", and giving them a glyph would
+// dress up an identification the layer does not claim to have.
 const pinIcon = (variant) =>
   L.divIcon({
     className: `map-pin map-pin-${variant}`,
@@ -92,8 +100,6 @@ const pinIcon = (variant) =>
   })
 
 const ICONS = {
-  catch: pinIcon('catch'),
-  threat_report: pinIcon('threat'),
   // Two greys, not one. An observation identified to species is something you
   // can go and find; one identified only to genus or family is a lead. Both
   // read as "not yours yet" against the solid catch and threat pins.
@@ -185,7 +191,14 @@ function RegionStrip({ at }) {
 
 function CatchMarkers({ catches }) {
   return catches.map((c) => (
-    <Marker key={c.id} position={[c.lat, c.lng]} icon={ICONS[c.type] ?? ICONS.catch}>
+    <Marker
+      key={c.id}
+      position={[c.lat, c.lng]}
+      // Bucketed from the scientific_name already on the row — no lookup, and
+      // so no per-marker request. See taxonCategory.js for why the genus is the
+      // only taxonomy a catch row carries.
+      icon={categoryIcon(c.type, taxonToIconCategory(c))}
+    >
       <Popup>
         <strong>{c.common_name ?? 'Unknown species'}</strong>
         <br />
@@ -419,6 +432,61 @@ function LayerToggle({ showUnknown, onToggle, caption }) {
   )
 }
 
+/**
+ * A legend entry drawn with the same markup as the marker it explains.
+ *
+ * `dangerouslySetInnerHTML` because the SVG is a string — it has to be, since
+ * Leaflet takes marker artwork as HTML. The string is a template literal built
+ * from module constants in markerIcons.js with nothing user-supplied anywhere
+ * in it, so there is no injection surface here; the alternative is a second,
+ * JSX copy of every glyph that would drift from the first.
+ */
+function LegendMark({ type, category }) {
+  return (
+    <span
+      className="map-legend-mark"
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: legendSvg(type, category) }}
+    />
+  )
+}
+
+/**
+ * Two readings of the same markers, because they carry two independent facts.
+ *
+ * The frame says whether a record is a catch or a threat report; the glyph says
+ * what kind of plant it is. Listing all twelve combinations would be a wall —
+ * so the first row explains the frames, using the unknown glyph so nothing in
+ * it suggests a category, and the second explains the glyphs on the catch
+ * frame, since that is the one most pins wear.
+ */
+function MapLegend({ showUnknown }) {
+  return (
+    <div className="capture-muted map-legend">
+      <p className="map-legend-row">
+        <span className="map-legend-item">
+          <LegendMark type="catch" category="unknown" /> Catch
+        </span>
+        <span className="map-legend-item">
+          <LegendMark type="threat_report" category="unknown" /> Threat report
+        </span>
+        {showUnknown && (
+          <span className="map-legend-item">
+            <span className="map-swatch map-swatch-unknown" aria-hidden="true" /> Not caught yet
+          </span>
+        )}
+      </p>
+      <p className="map-legend-row">
+        {LEGEND_CATEGORIES.map(({ category, label }) => (
+          <span className="map-legend-item" key={category}>
+            <LegendMark type="catch" category={category} /> {label}
+          </span>
+        ))}
+      </p>
+    </div>
+  )
+}
+
 /** What the toggle says about itself underneath. Null when there is nothing to add. */
 function captionFor(showUnknown, status) {
   if (!showUnknown) return null
@@ -574,15 +642,7 @@ export default function MapView() {
         </MapContainer>
       )}
 
-      <p className="capture-muted map-legend">
-        <span className="map-swatch map-swatch-catch" aria-hidden="true" /> Catch
-        <span className="map-swatch map-swatch-threat" aria-hidden="true" /> Threat report
-        {showUnknown && (
-          <>
-            <span className="map-swatch map-swatch-unknown" aria-hidden="true" /> Not caught yet
-          </>
-        )}
-      </p>
+      <MapLegend showUnknown={showUnknown} />
     </section>
   )
 }
