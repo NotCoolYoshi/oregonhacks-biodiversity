@@ -744,18 +744,25 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Map layer switch
+   Map layer panel
 
-   Only the additive layer gets a control. Catches are the map's subject, not a
-   layer — there is no version of this page where hiding them is useful.
+   One control per layer, wrapping. Items align to the top rather than the
+   baseline because a layer can carry a caption under its own switch, and
+   baseline alignment would hang the captionless ones off the first line of it.
    --------------------------------------------------------------------------- */
 
 .map-layers {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.75rem;
+  align-items: flex-start;
+  gap: 0.35rem 1.1rem;
   margin: 0.6rem 0;
+}
+
+.map-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 .map-layer-toggle {
@@ -774,9 +781,11 @@
   cursor: pointer;
 }
 
+/* Under its own switch, not trailing the panel: with four switches, a caption
+   at the end of the row would not say which one it belonged to. Capped so a
+   long one wraps rather than stretching the panel past the other controls. */
 .map-layer-caption {
-  /* Its own line on a narrow screen, trailing the switch on a wide one. */
-  flex: 1 1 12rem;
+  max-width: 16rem;
 }
 
 /* Two rows: what the frames mean, then what the glyphs mean. Both wrap, because
