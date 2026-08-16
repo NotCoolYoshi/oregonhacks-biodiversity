@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+
 /* Typography and page scaffolding. Colour lives in theme.css — reference the
    semantic tokens (--text, --bg, --accent, …) from here, never raw hex. */
 :root {
