@@ -1,7 +1,14 @@
 .app {
+  /* #root is a column flex container, and an auto cross-axis margin cancels
+     the default `align-items: stretch`. Without this the box shrink-wraps its
+     content to ~305px and max-width never comes into play — every view renders
+     in a narrow column. `margin: 0 auto` still does the centring once the box
+     is full width and max-width caps it. */
+  width: 100%;
   max-width: 960px;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
+  box-sizing: border-box;
   text-align: left;
 }
 
@@ -426,6 +433,43 @@
   font-size: 1rem;
 }
 
+/* The name is a button so it is reachable by keyboard and announced as
+   activatable, but it has to read as the heading it replaced — hence stripping
+   the button chrome back down to .name and leaving only a hover hint. */
+.profile-text .name-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-h);
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-text .name-button:hover {
+  text-decoration: underline dotted;
+}
+
+.profile-text .name-input {
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  /* Matches the rendered name's width closely enough that the row does not
+     jump when it swaps between the button and the field. */
+  width: 12ch;
+}
+
+.profile-text .name-input:disabled {
+  opacity: 0.6;
+}
+
 .profile-text .owned {
   font-size: 0.85rem;
   color: var(--text);
@@ -444,4 +488,58 @@
 
 .profile-text .skeleton.owned {
   width: 100px;
+}
+
+/* ---------------------------------------------------------------------------
+   Map markers
+
+   Green circle = catch, orange diamond = threat report. Shape carries the
+   distinction as well as colour, so the two stay tellable apart when the map
+   tiles are busy or the viewer cannot separate the hues.
+   --------------------------------------------------------------------------- */
+
+/* Never put `transform` on .map-pin itself — Leaflet owns that property for
+   marker positioning. The shape lives on the inner span. */
+.map-pin-shape,
+.map-swatch {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.map-pin-catch .map-pin-shape,
+.map-swatch-catch {
+  background: rgb(34, 160, 90);
+  border-radius: 50%;
+}
+
+.map-pin-threat .map-pin-shape,
+.map-swatch-threat {
+  background: rgb(214, 120, 20);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.map-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.map-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: none;
+}
+
+.map-popup-catch {
+  color: rgb(24, 120, 66);
+}
+
+.map-popup-threat {
+  color: rgb(170, 92, 12);
 }
