@@ -1,0 +1,63 @@
+-- ============================================================================
+-- Migration 004 — a family column on catches, for the achievement-badge work.
+--
+-- RUN THIS BY HAND IN THE SUPABASE SQL EDITOR (same as 001, 002, and 003):
+--   Supabase dashboard -> your project -> SQL Editor -> New query
+--   -> paste this whole file -> Run
+--
+-- Nothing in this repo executes it. There is no migration runner; the service
+-- role key talks to PostgREST, which cannot run DDL. See docs/db-api-audit-
+-- 20260816.md section 1 for the full account of why every migration in this
+-- directory works this way.
+--
+-- Why: Pl@ntNet's identify response already carries the plant family
+-- (species.family.scientificNameWithoutAuthor, mapped to `family` in
+-- server/src/services/plantnet.js), and the client already has it on the
+-- selected candidate by the time it calls POST /api/catches — it just never
+-- had a column to land in. This is what lets that route compute "this is
+-- your 3rd Rosaceae catch" (see POST /api/catches in routes/api.js).
+--
+-- No backfill: existing rows keep family = NULL. iNaturalist's taxa endpoint
+-- (what a legacy row's taxon_id could be re-looked-up against) does not
+-- return family in the shape this app reads today, and per the task this
+-- only needs to apply going forward. A NULL family is not ambiguous here —
+-- it means "recorded before this column existed," and the per-family
+-- sequence query in POST /api/catches only ever matches on a real family
+-- string, so those rows simply don't participate in anyone's count. That is
+-- the correct behavior, not a gap: nothing promised a person's 2024 catches
+-- would retroactively gain a family-sequence number.
+--
+-- Safe to re-run.
+-- ============================================================================
+
+alter table public.catches add column if not exists family text;
+
+-- Serves the per-family sequential-number read in POST /api/catches: after
+-- inserting a row, that route counts this user's existing rows with the same
+-- family. Same shape as catches_user_id_idx / catches_user_created_idx below
+-- it — a filter on (user_id, ...) that an existing index doesn't already
+-- cover.
+create index if not exists catches_user_family_idx
+  on public.catches (user_id, family);
+
+-- ---------------------------------------------------------------------------
+-- Badge/achievement state: no new table, on purpose.
+--
+-- Decision: badges are computed on-the-fly from `catches` on every read of
+-- GET /api/users/:userId/achievements, the same way totalPoints already is on
+-- GET /api/users/:userId (see routes/api.js — that route re-sums POINTS over
+-- every row rather than persisting a total). Badge unlock here is a pure
+-- function of two counts (distinct native species, distinct invasive
+-- species) that already live in `catches`, and both counts are monotonic —
+-- there is no "revoke a badge" case to model, and no product requirement yet
+-- for a persisted "unlocked at" timestamp (nothing sends a notification or
+-- feed entry at the moment of unlock).
+--
+-- If that changes — a toast the instant a badge unlocks, a feed of past
+-- unlocks, badges that can expire or be retired — that is the trigger to add
+-- a `user_achievements` (or similar) table with an unlock event per badge.
+-- Until then, a table here would be state with no reader that could disagree
+-- with a query already available for free. Full reasoning duplicated at the
+-- top of the achievements route itself, since that's where a future reader
+-- is more likely to be looking when this decision needs revisiting.
+-- ---------------------------------------------------------------------------

@@ -135,3 +135,13 @@ export const getCurrentUser = (userId) =>
  */
 export const updateDisplayName = (userId, displayName) =>
   api.post('/api/users', { userId, displayName }).then((r) => r.data)
+
+/**
+ * GET /api/users/:userId/achievements — native and invasive badge state.
+ *
+ * Resolves to { userId, nativeSpeciesCount, invasiveSpeciesCount, nativeBadges,
+ * invasiveBadges }, where each badge is { threshold, label, unlocked }.
+ * Computed server-side on every call, not stored — see the route for why.
+ */
+export const getUserAchievements = (userId) =>
+  api.get(`/api/users/${encodeURIComponent(userId)}/achievements`).then((r) => r.data)

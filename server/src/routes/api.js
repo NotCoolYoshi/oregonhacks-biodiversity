@@ -47,6 +47,39 @@ const SCAN_LIMIT = 10_000
 // header it is rendered into.
 const MAX_DISPLAY_NAME = 60
 
+// ---------------------------------------------------------------------------
+// Badges
+//
+// Counted against distinct species (taxon_id), not raw catch rows — the same
+// unit the catalogue has always used for milestones (see the client's old,
+// now-removed MILESTONES mock). Photographing the same plant five times is
+// one milestone, not five. Native badges count catches where type = 'catch';
+// invasive badges count type = 'threat_report' — see GET
+// /users/:userId/achievements for how the two counts are read.
+//
+// Order matters: badgeState() below assumes each list is sorted ascending by
+// threshold, which both of these are.
+// ---------------------------------------------------------------------------
+const NATIVE_BADGES = [
+  { threshold: 1, label: 'First Seed' },
+  { threshold: 5, label: 'Tender Sprout' },
+  { threshold: 10, label: 'Budding Grace' },
+  { threshold: 25, label: "Petal's Promise" },
+  { threshold: 50, label: 'In Full Bloom' },
+  { threshold: 75, label: 'Verdant Bloom' },
+  { threshold: 100, label: 'Keeper of the Garden' },
+]
+
+const INVASIVE_BADGES = [
+  { threshold: 1, label: 'First Watch' },
+  { threshold: 5, label: 'Vigilant Hand' },
+  { threshold: 10, label: 'Warden of the Wild' },
+  { threshold: 25, label: 'Guardian of the Grove' },
+]
+
+/** Attach `unlocked` to each badge in a (sorted) list, given a species count. */
+const badgeState = (badges, count) => badges.map((b) => ({ ...b, unlocked: count >= b.threshold }))
+
 const clampPercent = (n) => Math.max(0, Math.min(100, Math.round(n)))
 
 /**
@@ -545,13 +578,19 @@ router.get('/observations/nearby', async (req, res, next) => {
 
 /**
  * POST /api/catches
- * Body: { userId, taxonId, scientificName, commonName, type, location: { lat, lng },
+ * Body: { userId, taxonId, scientificName, commonName, family, type, location: { lat, lng },
  *         placeId, photoUrl, confidence }
  * Records a capture or a threat report.
  *
  * `location` decides the place, and through it the native/invasive verdict —
  * see resolvePlaceForRequest(). `placeId` is accepted but no longer expected
  * from the capture flow.
+ *
+ * `family` is Pl@ntNet's, passed straight through from the client (see
+ * plantnet.js's mapResult) — unlike scientificName/commonName there is no
+ * iNaturalist family lookup for this route to prefer instead. Trusted at the
+ * same level lat/lng already are: not a classification, so nothing here turns
+ * on it being right.
  */
 router.post('/catches', async (req, res, next) => {
   if (!requireDatabase(res)) return
@@ -662,6 +701,7 @@ router.post('/catches', async (req, res, next) => {
         // and scientific_name is NOT NULL.
         scientific_name: status.scientificName ?? body.scientificName ?? null,
         common_name: status.commonName ?? body.commonName ?? null,
+        family: String(body.family ?? '').trim() || null,
         type,
         place_id: placeId,
         place_name: place.placeName,
@@ -675,6 +715,28 @@ router.post('/catches', async (req, res, next) => {
 
     if (insertError) throw toDatabaseError(insertError)
 
+    // This catch's position within (user_id, family) — "your 3rd Rosaceae
+    // catch." A read after the insert, not a stored counter: the row just
+    // written is already in the table, so counting every row that matches is
+    // both the count and the correct sequence number for it in one query,
+    // with no separate increment step that could drift from reality.
+    //
+    // Only meaningful when this catch carries a family. Rows with no family —
+    // either this client sent none, or the catch predates migration 004 —
+    // don't match `.eq('family', ...)` against anything and so never enter
+    // anyone's count; see that migration's comment for why that's correct.
+    let familySequence = null
+    if (row.family) {
+      const { data: familyRows, error: familyError } = await sb
+        .from('catches')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('family', row.family)
+
+      if (familyError) throw toDatabaseError(familyError)
+      familySequence = familyRows.length
+    }
+
     res.status(201).json({
       id: row.id,
       userId: row.user_id,
@@ -682,6 +744,8 @@ router.post('/catches', async (req, res, next) => {
       taxonId: row.taxon_id,
       scientificName: row.scientific_name,
       commonName: row.common_name,
+      family: row.family,
+      familySequence,
       placeId: row.place_id,
       placeName: row.place_name,
       // Which rule named the place. 'fallback' is the one worth showing a user:
@@ -948,6 +1012,76 @@ router.get('/users/:userId', async (req, res, next) => {
     })
   } catch (err) {
     handleRouteError(err, 'users/get', res, next)
+  }
+})
+
+/**
+ * GET /api/users/:userId/achievements
+ * Native and invasive badge state for a user.
+ *
+ * Decision: on-the-fly, not persisted. This route re-derives everything from
+ * `catches` on every call — the same pattern GET /api/users/:userId already
+ * uses for totalPoints — rather than reading or writing a badge/unlock table.
+ * Reasoning, so this doesn't need re-litigating the next time someone is
+ * tempted to add one:
+ *
+ *   - Both counts (distinct native species, distinct invasive species) are
+ *     monotonic. There is no "a badge was unlocked, then un-unlocked" case to
+ *     store a transition for — whether badge N is unlocked is fully
+ *     determined by comparing a count already sitting in `catches` against a
+ *     constant threshold, every time.
+ *   - Nothing downstream needs a point-in-time record. No toast fires the
+ *     instant a badge unlocks, no feed lists past unlocks, nothing here can
+ *     expire or be revoked. Those are the concrete things that would need an
+ *     "unlocked at" timestamp — and the moment one of them becomes real, that
+ *     is the signal to add a `user_achievements` table, not before.
+ *   - A client that wants to detect a *new* unlock (to show a toast, say) can
+ *     already do it without server help: diff this response's `unlocked`
+ *     flags against the previous response it fetched. That covers the one
+ *     case above that sounds like it needs persistence and doesn't.
+ *
+ * Same duplicate-species handling as GET /api/users/:userId: a species caught
+ * in two places is one entry toward the count, not two.
+ */
+router.get('/users/:userId/achievements', async (req, res, next) => {
+  if (!requireDatabase(res)) return
+
+  const userId = String(req.params.userId ?? '').trim()
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
+  }
+
+  try {
+    const sb = getSupabase()
+
+    // Same guard rail as GET /api/users/:userId and the score route: a cap,
+    // not pagination.
+    const { data: rows, error } = await sb
+      .from('catches')
+      .select('taxon_id, type')
+      .eq('user_id', userId)
+      .limit(SCAN_LIMIT)
+
+    if (error) throw toDatabaseError(error)
+
+    const catches = rows ?? []
+    const nativeSpeciesCount = new Set(
+      catches.filter((row) => row.type === 'catch').map((row) => row.taxon_id),
+    ).size
+    const invasiveSpeciesCount = new Set(
+      catches.filter((row) => row.type === 'threat_report').map((row) => row.taxon_id),
+    ).size
+
+    res.json({
+      userId,
+      nativeSpeciesCount,
+      invasiveSpeciesCount,
+      nativeBadges: badgeState(NATIVE_BADGES, nativeSpeciesCount),
+      invasiveBadges: badgeState(INVASIVE_BADGES, invasiveSpeciesCount),
+      source: 'supabase',
+    })
+  } catch (err) {
+    handleRouteError(err, 'users/achievements', res, next)
   }
 })
 
