@@ -433,6 +433,43 @@
   font-size: 1rem;
 }
 
+/* The name is a button so it is reachable by keyboard and announced as
+   activatable, but it has to read as the heading it replaced — hence stripping
+   the button chrome back down to .name and leaving only a hover hint. */
+.profile-text .name-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-h);
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-text .name-button:hover {
+  text-decoration: underline dotted;
+}
+
+.profile-text .name-input {
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-h);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  /* Matches the rendered name's width closely enough that the row does not
+     jump when it swaps between the button and the field. */
+  width: 12ch;
+}
+
+.profile-text .name-input:disabled {
+  opacity: 0.6;
+}
+
 .profile-text .owned {
   font-size: 0.85rem;
   color: var(--text);

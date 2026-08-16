@@ -55,3 +55,30 @@ export const getCatches = (params) =>
 /** GET /api/region/:placeId/score — aggregated regional biodiversity health score. */
 export const getRegionScore = (placeId) =>
   api.get(`/api/region/${placeId}/score`).then((r) => r.data)
+
+/**
+ * GET /api/users/:userId — one user's name and totals.
+ *
+ * Resolves to { userId, displayName, totalPoints, catchCount, uniqueSpeciesCount }.
+ * Never rejects with a 404: a session that has an id but no row yet — which is
+ * every session, briefly — comes back with a null displayName and zeros.
+ *
+ * `userId` comes from session.js. There is no server-side notion of "current"
+ * anything, so it has to be passed in.
+ */
+export const getCurrentUser = (userId) =>
+  api.get(`/api/users/${encodeURIComponent(userId)}`).then((r) => r.data)
+
+/**
+ * POST /api/users — create the user's row, or rename it.
+ *
+ * Called two ways:
+ *   updateDisplayName(userId)          establish a row on first load and let
+ *                                      the server generate the name.
+ *   updateDisplayName(userId, 'Fern')  rename.
+ *
+ * Idempotent either way, and a blank name is treated as "no name given" rather
+ * than as an erasure. Resolves to { userId, displayName, createdAt, created }.
+ */
+export const updateDisplayName = (userId, displayName) =>
+  api.post('/api/users', { userId, displayName }).then((r) => r.data)

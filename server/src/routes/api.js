@@ -30,7 +30,31 @@ const CONTRIBUTOR_TARGET = 15
 // GET /region/:placeId/score — this is a guard rail, not pagination.
 const SCAN_LIMIT = 10_000
 
+// Long enough for a real name, short enough that it cannot wreck the profile
+// header it is rendered into.
+const MAX_DISPLAY_NAME = 60
+
 const clampPercent = (n) => Math.max(0, Math.min(100, Math.round(n)))
+
+/**
+ * A name for a user who has not chosen one — "Explorer 4821".
+ *
+ * Four digits, so it reads like a handle rather than an id, and collisions are
+ * both likely and harmless: this is a label, and user_id is what identifies
+ * anyone. Nothing anywhere requires display_name to be unique.
+ */
+function defaultDisplayName() {
+  return `Explorer ${Math.floor(1000 + Math.random() * 9000)}`
+}
+
+/** A public.users row as the API speaks it. `created` distinguishes 201 from 200. */
+const serializeUser = (row, created) => ({
+  userId: row.user_id,
+  displayName: row.display_name ?? null,
+  createdAt: row.created_at,
+  created,
+  source: 'supabase',
+})
 
 /** Standard US letter scale. The mock's 78 = 'B+' was fiction. */
 function gradeFor(score) {
@@ -79,37 +103,50 @@ router.post('/identify', async (req, res, next) => {
   }
 })
 
+// Which file to run when a table is missing or ungranted. The whole value of
+// these messages is that they name the exact thing to paste into the SQL
+// editor, so a new table has to be listed here or its errors send people to
+// the wrong file.
+const SCHEMA_SOURCE = {
+  catches: { create: 'server/src/db/schema.sql', grant: 'migration 001' },
+  users: { create: 'server/src/db/migrations/003_add_users_table.sql', grant: 'migration 003' },
+}
+
 /**
  * Turn a PostgREST error into something with a status code.
  *
  * Same idea as toPlantNetError / toINaturalistError in the services, but these
  * failures are our own fault rather than an upstream's, so most of them are
  * 500s and the message points at the fix.
+ *
+ * `table` only steers that message. Pass the one the failed query touched.
  */
-function toDatabaseError(error) {
+function toDatabaseError(error, table = 'catches') {
   const err = new Error()
   err.name = 'DatabaseError'
   err.isDatabaseError = true
+
+  const source = SCHEMA_SOURCE[table] ?? SCHEMA_SOURCE.catches
 
   switch (error.code) {
     case '42P01': // undefined_table
       err.status = 500
       err.code = 'SCHEMA_MISSING'
       err.message =
-        'The catches table does not exist. Run server/src/db/schema.sql in the Supabase SQL editor.'
+        `The ${table} table does not exist. Run ${source.create} in the Supabase SQL editor.`
       break
     case '42703': // undefined_column
       err.status = 500
       err.code = 'SCHEMA_STALE'
       err.message =
-        `The catches table is missing a column (${error.message}). Run the files in ` +
+        `The ${table} table is missing a column (${error.message}). Run the files in ` +
         'server/src/db/migrations/ in the Supabase SQL editor.'
       break
     case '42501': // insufficient_privilege
       err.status = 500
       err.code = 'DB_PERMISSION_DENIED'
       err.message =
-        'The service role cannot read or write public.catches. Run migration 001 (it ends ' +
+        `The service role cannot read or write public.${table}. Run ${source.grant} (it ends ` +
         'with the grant) in the Supabase SQL editor.'
       break
     case '23514': // check_violation
@@ -121,6 +158,9 @@ function toDatabaseError(error) {
       // POST /api/catches checks for a duplicate before inserting, so reaching
       // this means two requests raced past that check. The unique index added
       // in migration 002 is what actually makes the rule hold.
+      //
+      // POST /api/users can also race, but it resolves its own 23505 by
+      // re-reading the winner's row and never gets here.
       err.status = 409
       err.code = 'DUPLICATE_CATCH'
       err.message = 'You have already logged that species in this place.'
@@ -135,7 +175,7 @@ function toDatabaseError(error) {
 }
 
 /**
- * Guard the two database-backed routes.
+ * Guard the database-backed routes.
  *
  * Mirrors the hasApiKey() check on /identify: a missing config should say so
  * plainly rather than throwing from inside getSupabase().
@@ -490,6 +530,169 @@ router.get('/catches', async (req, res, next) => {
     })
   } catch (err) {
     handleRouteError(err, 'catches/list', res, next)
+  }
+})
+
+/**
+ * POST /api/users
+ * Body: { userId, displayName? }
+ * Creates the user's row, or renames an existing one. Idempotent.
+ *
+ * There are no accounts: `userId` is the string the browser generated and kept
+ * in localStorage (see client/src/session.js), and this route takes it on
+ * trust exactly as POST /catches does. All this table adds is a name to put
+ * next to it.
+ *
+ * Two callers, one route:
+ *   { userId }                  first load — establish a row, keep any name it
+ *                               already has, generate one if it has none.
+ *   { userId, displayName }     the rename action — overwrite it.
+ *
+ * A blank or whitespace-only displayName counts as "not supplied" rather than
+ * an instruction to erase the name; a user who clears the rename field and
+ * submits gets to keep what they had.
+ */
+router.post('/users', async (req, res, next) => {
+  if (!requireDatabase(res)) return
+
+  const body = req.body ?? {}
+  const userId = String(body.userId ?? '').trim()
+
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
+  }
+
+  const requestedName = String(body.displayName ?? '').trim()
+  const hasDisplayName = requestedName !== ''
+
+  if (requestedName.length > MAX_DISPLAY_NAME) {
+    return res.status(400).json({
+      error: `displayName must be ${MAX_DISPLAY_NAME} characters or fewer.`,
+      code: 'BAD_REQUEST',
+    })
+  }
+
+  try {
+    const sb = getSupabase()
+
+    const { data: found, error: readError } = await sb
+      .from('users')
+      .select('user_id, display_name, created_at')
+      .eq('user_id', userId)
+
+    if (readError) throw toDatabaseError(readError, 'users')
+
+    const existing = found?.[0] ?? null
+
+    // Already here, and the caller has nothing new to say. Hand back what is
+    // stored rather than writing an identical row — this is the first-load
+    // path, and it runs on every reload.
+    if (existing && !hasDisplayName) {
+      return res.json(serializeUser(existing, false))
+    }
+
+    if (existing) {
+      const { data: updated, error: updateError } = await sb
+        .from('users')
+        .update({ display_name: requestedName })
+        .eq('user_id', userId)
+        .select()
+        .single()
+
+      if (updateError) throw toDatabaseError(updateError, 'users')
+      return res.json(serializeUser(updated, false))
+    }
+
+    const { data: inserted, error: insertError } = await sb
+      .from('users')
+      .insert({
+        user_id: userId,
+        display_name: hasDisplayName ? requestedName : defaultDisplayName(),
+      })
+      .select()
+      .single()
+
+    if (insertError) {
+      // Two first-loads raced past the select above and both tried to insert.
+      // The primary key settled it; the loser re-reads rather than failing,
+      // because "the row exists" is the outcome it wanted anyway.
+      if (insertError.code === '23505') {
+        const { data: raced, error: rereadError } = await sb
+          .from('users')
+          .select('user_id, display_name, created_at')
+          .eq('user_id', userId)
+
+        if (rereadError) throw toDatabaseError(rereadError, 'users')
+        if (raced?.[0]) return res.json(serializeUser(raced[0], false))
+      }
+      throw toDatabaseError(insertError, 'users')
+    }
+
+    res.status(201).json(serializeUser(inserted, true))
+  } catch (err) {
+    handleRouteError(err, 'users/upsert', res, next)
+  }
+})
+
+/**
+ * GET /api/users/:userId
+ * Returns { userId, displayName, totalPoints, catchCount, uniqueSpeciesCount }.
+ *
+ * Never 404s. A brand new session has a userId before it has a row in `users`
+ * — session.js mints the id locally and only then calls POST /users — so a
+ * missing row is the normal opening state, not an error. It reports a null
+ * displayName and zeros, which is the truth about that user.
+ *
+ * There is no foreign key between catches.user_id and users.user_id (see
+ * migration 003), so the two halves are read independently and neither
+ * requires the other to exist. Catches recorded before this table existed
+ * still count towards the totals.
+ *
+ * Counting, deliberately:
+ *   catchCount         every row this user has recorded, threat reports
+ *                      included — the same sense of "catches" that
+ *                      GET /api/catches uses.
+ *   uniqueSpeciesCount distinct taxa, so the same species logged in two places
+ *                      is one entry in the dex. This is what the profile shows
+ *                      as "Owned".
+ *   totalPoints        POINTS applied per row, from the same table the award
+ *                      on POST /catches reads.
+ */
+router.get('/users/:userId', async (req, res, next) => {
+  if (!requireDatabase(res)) return
+
+  const userId = String(req.params.userId ?? '').trim()
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
+  }
+
+  try {
+    const sb = getSupabase()
+
+    const [
+      { data: found, error: userError },
+      { data: rows, error: catchError },
+    ] = await Promise.all([
+      sb.from('users').select('user_id, display_name, created_at').eq('user_id', userId),
+      // Same guard rail as the score route: a cap, not pagination.
+      sb.from('catches').select('taxon_id, type').eq('user_id', userId).limit(SCAN_LIMIT),
+    ])
+
+    if (userError) throw toDatabaseError(userError, 'users')
+    if (catchError) throw toDatabaseError(catchError)
+
+    const catches = rows ?? []
+
+    res.json({
+      userId,
+      displayName: found?.[0]?.display_name ?? null,
+      totalPoints: catches.reduce((sum, row) => sum + (POINTS[row.type] ?? 0), 0),
+      catchCount: catches.length,
+      uniqueSpeciesCount: new Set(catches.map((row) => row.taxon_id)).size,
+      source: 'supabase',
+    })
+  } catch (err) {
+    handleRouteError(err, 'users/get', res, next)
   }
 })
 
