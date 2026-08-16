@@ -75,6 +75,53 @@ const percent = (score) => `${Math.round((score ?? 0) * 100)}%`
 
 const scoreOf = (candidate) => candidate?.score ?? 0
 
+/**
+ * The retry ladder, drawn as a ring.
+ *
+ * Purely presentational — it reads `attempt` and `total` and decides nothing.
+ * The ladder itself (CONFIDENCE_THRESHOLD, MAX_ATTEMPTS, handleWeakAttempt)
+ * is untouched by this.
+ *
+ * The arc is deep green rather than the accent yellow: it is a thin graphical
+ * element on the field green, where yellow sits at 1.1:1 and disappears. On the
+ * final attempt it turns to the threat orange, so "this is your last photo"
+ * arrives as a colour change and not only as a sentence underneath.
+ */
+const RING_RADIUS = 26
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
+function AttemptRing({ attempt, total }) {
+  const isLast = attempt >= total
+  // Guarded so a ratio above 1 could never render a backwards arc.
+  const progress = Math.min(attempt / total, 1)
+
+  return (
+    <div className={`attempt-ring${isLast ? ' is-last' : ''}`}>
+      <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle className="attempt-ring-track" cx="32" cy="32" r={RING_RADIUS} />
+        <circle
+          className="attempt-ring-arc"
+          cx="32"
+          cy="32"
+          r={RING_RADIUS}
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress)}
+        />
+      </svg>
+      {/* The number is in the DOM twice on purpose: once visually inside the
+          ring, once as a full sentence for screen readers, which get nothing
+          useful from "3" on its own. */}
+      <span className="attempt-ring-count" aria-hidden="true">
+        {attempt}
+        <small>/{total}</small>
+      </span>
+      <span className="sr-only">
+        Attempt {attempt} of {total}.
+      </span>
+    </div>
+  )
+}
+
 export default function PhotoCapture() {
   const [phase, setPhase] = useState('idle')
 
@@ -356,12 +403,16 @@ export default function PhotoCapture() {
 
         <p className="capture-note">{retryTip}</p>
 
-        <p className="capture-muted">
-          Attempt {attempts} of {MAX_ATTEMPTS}.{' '}
-          {attempts === MAX_ATTEMPTS - 1
-            ? 'One more, then we go with the closest match so far.'
-            : `${MAX_ATTEMPTS - attempts} left before we go with the closest match so far.`}
-        </p>
+        <div className="attempt-status">
+          <AttemptRing attempt={attempts} total={MAX_ATTEMPTS} />
+          {/* The ring carries the count; this carries what the count means,
+              which is the part a bare "3/5" cannot say. */}
+          <p className="capture-muted">
+            {attempts === MAX_ATTEMPTS - 1
+              ? 'One more, then we go with the closest match so far.'
+              : `${MAX_ATTEMPTS - attempts} left before we go with the closest match so far.`}
+          </p>
+        </div>
 
         {bestCandidate && (
           <p className="capture-muted capture-detail">
