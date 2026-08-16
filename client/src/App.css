@@ -1,4 +1,6 @@
 .app {
+  position: relative;
+  z-index: 1; /* Above the forest backdrop, which is z-index 0 inside #root. */
   /* #root is a column flex container, and an auto cross-axis margin cancels
      the default `align-items: stretch`. Without this the box shrink-wraps its
      content to ~305px and max-width never comes into play — every view renders
@@ -36,18 +38,19 @@
   transform: translateX(-50%);
   z-index: 500; /* Leaflet's own panes top out at 400. */
   width: min(30rem, calc(100% - 1.6rem));
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, #000 20%, var(--color-deep-green));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  backdrop-filter: blur(14px) saturate(150%);
+  /* Solid deep green rather than a translucent tint of the page: the tab bar
+     floats over the map, and a see-through bar over satellite tiles loses the
+     contrast the labels depend on. */
+  background: color-mix(in srgb, var(--color-deep-green) 94%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
   box-shadow: var(--shadow);
 }
 
-/* No backdrop-filter (older Firefox) means the blur does nothing and the
-   translucent background just leaks the page through. Go opaque there. */
 @supports not (backdrop-filter: blur(1px)) {
   .nav {
-    background: var(--bg);
+    background: var(--color-deep-green);
   }
 }
 
@@ -70,7 +73,9 @@
   padding: 0.45rem 0.2rem 0.4rem;
   border-radius: 999px;
   text-decoration: none;
-  color: var(--text);
+  /* On the deep-green bar, not on the page — a light tint of the field green
+     rather than --text, which is tuned for the opposite background. 5.8:1. */
+  color: color-mix(in srgb, var(--color-field) 80%, var(--color-deep-green));
   font-size: 0.7rem;
   letter-spacing: 0.2px;
   transition:
@@ -92,21 +97,23 @@
 }
 
 .nav-tab:hover {
-  color: var(--text-h);
+  color: #fff;
 }
 
 .nav-tab:hover .nav-icon {
   transform: translateY(-2px);
 }
 
+/* Yellow, not --accent: the ring sits on the deep-green bar, where deep green
+   is invisible. */
 .nav-tab:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--highlight);
   outline-offset: 2px;
 }
 
 .nav-tab.active {
-  color: var(--accent);
-  background: var(--accent-bg);
+  color: var(--highlight);
+  background: color-mix(in srgb, #fff 14%, transparent);
 }
 
 .nav-tab.active .nav-icon {
@@ -168,10 +175,17 @@
   font-size: 0.95rem;
   padding: 0.6rem 1.1rem;
   border-radius: 8px;
-  border: 1px solid var(--accent-border);
+  border: 1px solid transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
   cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.capture button:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 12%, var(--accent));
 }
 
 .capture button:disabled {
@@ -182,7 +196,11 @@
 .capture button.capture-secondary {
   background: transparent;
   color: var(--text-h);
-  border-color: var(--border);
+  border-color: var(--accent-border);
+}
+
+.capture button.capture-secondary:hover:not(:disabled) {
+  background: var(--accent-bg);
 }
 
 .capture-actions {
@@ -204,8 +222,8 @@
   font-size: 0.85rem;
   padding: 0.6rem 0.8rem;
   border-radius: 8px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-h);
 }
 
@@ -213,11 +231,12 @@
 
 .capture-organs {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 0.9rem 1rem 1rem;
   margin: 0;
   width: 100%;
   box-sizing: border-box;
+  background: var(--surface);
 }
 
 .capture-organs legend {
@@ -245,14 +264,25 @@
   color: var(--text-h);
 }
 
+.capture-chips label {
+  background: var(--surface-raised);
+}
+
+/* Filled deep green rather than a tint — the chips sit on a blue card, and a
+   10% wash of the accent is not separable from the card at a glance. */
 .capture-chips label.is-selected {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-on);
 }
 
 .capture-chips input {
   margin: 0;
   accent-color: var(--accent);
+}
+
+.capture-chips label.is-selected input {
+  accent-color: var(--highlight);
 }
 
 /* File input -------------------------------------------------------------- */
@@ -261,11 +291,17 @@
   display: inline-flex;
   align-items: center;
   padding: 0.7rem 1.1rem;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  border: 1px dashed var(--accent-border);
+  border-radius: var(--radius);
   cursor: pointer;
   color: var(--text-h);
   font-size: 0.95rem;
+  background: var(--surface);
+  transition: background-color 0.18s ease;
+}
+
+.capture-file:hover {
+  background: var(--surface-raised);
 }
 
 .capture-file input {
@@ -275,8 +311,9 @@
 .capture-preview {
   max-width: 100%;
   max-height: 16rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border: 3px solid var(--surface-raised);
+  box-shadow: var(--shadow);
   object-fit: cover;
 }
 
@@ -286,8 +323,9 @@
   width: 100%;
   box-sizing: border-box;
   padding: 0.9rem 1rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -297,14 +335,17 @@
   color: var(--text-h);
 }
 
+/* Catch and threat keep their own green/orange rather than taking the brand
+   palette: this pair is the app's one piece of semantic colour, and folding it
+   into the deep green every button already uses would erase the distinction. */
 .capture-verdict.is-native {
-  border-color: rgba(34, 160, 90, 0.5);
-  background: rgba(34, 160, 90, 0.1);
+  border-left: 4px solid var(--color-native);
+  background: var(--color-native-bg);
 }
 
 .capture-verdict.is-threat {
-  border-color: rgba(214, 120, 20, 0.5);
-  background: rgba(214, 120, 20, 0.12);
+  border-left: 4px solid var(--color-threat);
+  background: var(--color-threat-bg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -328,9 +369,9 @@
   align-items: center;
   gap: 1rem;
   padding: 0.8rem 1rem;
-  border-radius: 10px;
-  border: 1px solid rgba(34, 160, 90, 0.5);
-  background: rgba(34, 160, 90, 0.1);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .home-tip .tip-icon {
@@ -390,26 +431,30 @@
   line-height: 1.4;
 }
 
+/* Stat block: deep green slab, yellow numeral. The one place yellow is used as
+   a foreground colour, and it only works because the slab underneath it is
+   deep green (7.1:1). */
 .score-display {
   display: flex;
   align-items: center;
   gap: 1.5rem;
   padding: 1.2rem;
-  border-radius: 10px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--color-deep-green);
 }
 
 .score-value {
   font-size: 2.5rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--highlight);
   min-width: 6rem;
   text-align: center;
+  line-height: 1.1;
 }
 
 .score-label {
-  color: var(--text-h);
+  color: color-mix(in srgb, var(--color-field) 88%, var(--color-deep-green));
   font-size: 0.9rem;
 }
 
@@ -425,18 +470,28 @@
   align-items: center;
   gap: 0.7rem;
   padding: 1.2rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
+  background: var(--surface);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
   text-align: center;
 }
 
 .action-card:hover {
   border-color: var(--accent-border);
-  background: var(--accent-bg);
+  background: var(--surface-raised);
   transform: translateY(-2px);
   box-shadow: var(--shadow);
+}
+
+.action-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .action-card .action-icon {
@@ -468,11 +523,15 @@
   opacity: 0.5;
 }
 
+/* Flat pale blue with a deep-green rim — the brief's flat-shape direction, and
+   a gradient here would be the only one in the app. */
 .avatar {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-bg));
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
@@ -525,7 +584,7 @@
   font-size: 1rem;
   font-weight: 500;
   color: var(--text-h);
-  background: var(--accent-bg);
+  background: var(--surface-raised);
   border: 1px solid var(--accent);
   border-radius: 4px;
   padding: 0.1rem 0.3rem;
@@ -580,13 +639,13 @@
 
 .map-pin-catch .map-pin-shape,
 .map-swatch-catch {
-  background: rgb(34, 160, 90);
+  background: var(--color-native);
   border-radius: 50%;
 }
 
 .map-pin-threat .map-pin-shape,
 .map-swatch-threat {
-  background: rgb(214, 120, 20);
+  background: var(--color-threat);
   border-radius: 2px;
   transform: rotate(45deg);
 }
@@ -605,9 +664,9 @@
 }
 
 .map-popup-catch {
-  color: rgb(24, 120, 66);
+  color: var(--color-native);
 }
 
 .map-popup-threat {
-  color: rgb(170, 92, 12);
+  color: var(--color-threat);
 }
