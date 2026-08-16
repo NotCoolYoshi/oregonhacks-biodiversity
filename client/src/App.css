@@ -770,10 +770,24 @@
 /* ---------------------------------------------------------------------------
    Map markers
 
-   Green circle = catch, orange diamond = threat report. Shape carries the
-   distinction as well as colour, so the two stay tellable apart when the map
-   tiles are busy or the viewer cannot separate the hues.
+   Deep-green circle = catch, deep-green diamond = threat report, with a species
+   glyph inside each. Shape carries the catch/threat distinction as well as
+   colour, so the two stay tellable apart when the map tiles are busy or the
+   viewer cannot separate the hues.
+
+   Catch and threat markers are drawn as SVG in markerIcons.js — frame, glyph,
+   halo and all — so almost nothing about them is stylable from here, which is
+   the point: an SVG rotates its own diamond internally and never touches the
+   CSS `transform` that Leaflet needs for positioning.
    --------------------------------------------------------------------------- */
+
+/* The SVG is the marker. No box model of its own, so it cannot shift the
+   artwork off the anchor Leaflet computed for it. */
+.map-pin-catch-icon svg,
+.map-pin-threat-icon svg,
+.map-legend-mark svg {
+  display: block;
+}
 
 /* Never put `transform` on .map-pin itself — Leaflet owns that property for
    marker positioning. The shape lives on the inner span. */
@@ -785,19 +799,6 @@
   height: 100%;
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
-}
-
-.map-pin-catch .map-pin-shape,
-.map-swatch-catch {
-  background: var(--color-native);
-  border-radius: 50%;
-}
-
-.map-pin-threat .map-pin-shape,
-.map-swatch-threat {
-  background: var(--color-threat);
-  border-radius: 2px;
-  transform: rotate(45deg);
 }
 
 /* Nearby unknown plants: hollow and grey, so they read as absence against the
@@ -836,18 +837,25 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Map layer switch
+   Map layer panel
 
-   Only the additive layer gets a control. Catches are the map's subject, not a
-   layer — there is no version of this page where hiding them is useful.
+   One control per layer, wrapping. Items align to the top rather than the
+   baseline because a layer can carry a caption under its own switch, and
+   baseline alignment would hang the captionless ones off the first line of it.
    --------------------------------------------------------------------------- */
 
 .map-layers {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 0.75rem;
+  align-items: flex-start;
+  gap: 0.35rem 1.1rem;
   margin: 0.6rem 0;
+}
+
+.map-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 .map-layer-toggle {
@@ -866,22 +874,77 @@
   cursor: pointer;
 }
 
+/* Under its own switch, not trailing the panel: with four switches, a caption
+   at the end of the row would not say which one it belonged to. Capped so a
+   long one wraps rather than stretching the panel past the other controls. */
 .map-layer-caption {
-  /* Its own line on a narrow screen, trailing the switch on a wide one. */
-  flex: 1 1 12rem;
+  max-width: 16rem;
 }
 
+/* Two rows: what the frames mean, then what the glyphs mean. Both wrap, because
+   six categories do not fit a phone on one line and a legend that scrolls
+   sideways is a legend nobody reads. */
 .map-legend {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   margin-top: 0.6rem;
+}
+
+.map-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.85rem;
+  margin: 0 0 0.3rem;
+}
+
+.map-legend-row:last-child {
+  margin-bottom: 0;
+}
+
+.map-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+/* Half size. The map wants a marker big enough to carry a glyph; a paragraph
+   wants something that sits on the line without pushing it apart. */
+.map-legend-mark svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 .map-swatch {
   width: 0.8rem;
   height: 0.8rem;
   flex: none;
+}
+
+/* The shading gradient, as a bar rather than a square: it is a scale, not a
+   colour, and a single swatch would misreport it as one. Same stops as
+   HEAT_GRADIENT in regionShading.js — the stat strip's deep green through to
+   its accent yellow. */
+.map-shading-ramp {
+  width: 3rem;
+  height: 0.6rem;
+  flex: none;
+  border-radius: 0.3rem;
+  border: 1px solid var(--color-line);
+  background: linear-gradient(to right, #1a4531, #2f6b45, #7ba05b, #f0cf6b);
+}
+
+/* ---------------------------------------------------------------------------
+   Region shading (leaflet.heat)
+
+   The plugin puts its canvas in the overlay pane, which Leaflet stacks below
+   the marker pane — so pins are drawn over the shading for free and nothing
+   here needs to fight for z-index. What is left is opacity: at full strength
+   the heat blob swallows the map tiles and the pale nearby-unknown pins that
+   sit on top of it, and a layer that hides the map is not a layer worth having.
+   --------------------------------------------------------------------------- */
+.leaflet-heatmap-layer {
+  opacity: 0.62;
 }
 
 .map-popup-catch {
