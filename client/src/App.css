@@ -819,6 +819,32 @@
   flex: none;
 }
 
+/* The shading gradient, as a bar rather than a square: it is a scale, not a
+   colour, and a single swatch would misreport it as one. Same stops as
+   HEAT_GRADIENT in regionShading.js — the stat strip's deep green through to
+   its accent yellow. */
+.map-shading-ramp {
+  width: 3rem;
+  height: 0.6rem;
+  flex: none;
+  border-radius: 0.3rem;
+  border: 1px solid var(--color-line);
+  background: linear-gradient(to right, #1a4531, #2f6b45, #7ba05b, #f0cf6b);
+}
+
+/* ---------------------------------------------------------------------------
+   Region shading (leaflet.heat)
+
+   The plugin puts its canvas in the overlay pane, which Leaflet stacks below
+   the marker pane — so pins are drawn over the shading for free and nothing
+   here needs to fight for z-index. What is left is opacity: at full strength
+   the heat blob swallows the map tiles and the pale nearby-unknown pins that
+   sit on top of it, and a layer that hides the map is not a layer worth having.
+   --------------------------------------------------------------------------- */
+.leaflet-heatmap-layer {
+  opacity: 0.62;
+}
+
 .map-popup-catch {
   color: var(--color-native);
 }

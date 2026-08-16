@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { useNavigate } from 'react-router-dom'
 import L from 'leaflet'
@@ -8,6 +8,7 @@ import { getCatches, getRegionScore, resolvePlace, getNearbyObservations } from 
 import { getUserId } from '../session'
 import { taxonToIconCategory } from '../taxonCategory'
 import { categoryIcon, legendSvg, LEGEND_CATEGORIES } from '../markerIcons'
+import { addRegionShading } from '../regionShading'
 
 // Where the map opens when it has nothing better: the whole world, which is
 // honest about knowing nothing. It used to be the middle of Oregon, which was
@@ -208,6 +209,48 @@ function CatchMarkers({ catches }) {
       </Popup>
     </Marker>
   ))
+}
+
+/**
+ * Density shading under the pins, built from the catches already on screen.
+ *
+ * Takes no data of its own — `points` are the same rows CatchMarkers draws, so
+ * switching this on costs nothing but a canvas. Lives inside <MapContainer>
+ * because L.heatLayer needs the map instance.
+ *
+ * Additive and never load-bearing, on the same terms as the nearby-plants
+ * layer: the plugin is fetched on demand, and if that fetch fails the layer
+ * stays empty and the map carries on. Renders nothing itself — the heat canvas
+ * is a Leaflet layer, not a React child.
+ */
+function RegionShadingLayer({ enabled, points }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!enabled || points.length === 0) return undefined
+
+    let removeLayer = null
+    let cancelled = false
+
+    addRegionShading(map, points)
+      .then((remove) => {
+        // Switched off, or unmounted, while the plugin chunk was in flight.
+        if (cancelled) return remove()
+        removeLayer = remove
+      })
+      .catch((err) => {
+        // Deliberately swallowed, like the nearby layer's failures: this is a
+        // reading of the map, not the map.
+        console.warn('[map] region shading unavailable:', err?.message ?? err)
+      })
+
+    return () => {
+      cancelled = true
+      removeLayer?.()
+    }
+  }, [enabled, points, map])
+
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -418,14 +461,26 @@ function NearbyUnknownLayer({ enabled, onStatus, onPick }) {
  * The layer switch.
  *
  * Catches are not toggleable — they are the map's subject, and a map of nothing
- * is not a state worth offering. Only the additive layer gets a switch.
+ * is not a state worth offering. Only the additive layers get a switch.
  */
-function LayerToggle({ showUnknown, onToggle, caption }) {
+function LayerToggle({ showUnknown, onToggleUnknown, showShading, onToggleShading, caption }) {
   return (
     <div className="map-layers">
       <label className="map-layer-toggle">
-        <input type="checkbox" checked={showUnknown} onChange={(e) => onToggle(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={showUnknown}
+          onChange={(e) => onToggleUnknown(e.target.checked)}
+        />
         <span>Nearby unknown plants</span>
+      </label>
+      <label className="map-layer-toggle">
+        <input
+          type="checkbox"
+          checked={showShading}
+          onChange={(e) => onToggleShading(e.target.checked)}
+        />
+        <span>Region shading</span>
       </label>
       {caption && <span className="capture-muted map-layer-caption">{caption}</span>}
     </div>
@@ -460,7 +515,7 @@ function LegendMark({ type, category }) {
  * it suggests a category, and the second explains the glyphs on the catch
  * frame, since that is the one most pins wear.
  */
-function MapLegend({ showUnknown }) {
+function MapLegend({ showUnknown, showShading }) {
   return (
     <div className="capture-muted map-legend">
       <p className="map-legend-row">
@@ -473,6 +528,11 @@ function MapLegend({ showUnknown }) {
         {showUnknown && (
           <span className="map-legend-item">
             <span className="map-swatch map-swatch-unknown" aria-hidden="true" /> Not caught yet
+          </span>
+        )}
+        {showShading && (
+          <span className="map-legend-item">
+            <span className="map-shading-ramp" aria-hidden="true" /> Fewer → more records
           </span>
         )}
       </p>
@@ -518,6 +578,7 @@ function captionFor(showUnknown, status) {
 export default function MapView() {
   const navigate = useNavigate()
   const [showUnknown, setShowUnknown] = useState(false)
+  const [showShading, setShowShading] = useState(false)
   const [unknownStatus, setUnknownStatus] = useState(null)
   const [catches, setCatches] = useState([])
   const [loading, setLoading] = useState(true)
@@ -559,8 +620,17 @@ export default function MapView() {
     }
   }, [])
 
-  const plottable = catches.filter(isPlottable)
+  // Memoised because the shading layer takes these by identity: an array
+  // rebuilt on every render would tear the heat canvas down and put it back up
+  // on every render too.
+  const plottable = useMemo(() => catches.filter(isPlottable), [catches])
   const unplottable = catches.length - plottable.length
+
+  // Every record weighs the same. This is a count of what has been found, and a
+  // threat report is as much a record of someone having looked as a catch is —
+  // weighting them apart would make the shading say something about health that
+  // a density field cannot support.
+  const heatPoints = useMemo(() => plottable.map((c) => [c.lat, c.lng, 1]), [plottable])
 
   return (
     <section>
@@ -570,10 +640,12 @@ export default function MapView() {
 
       <LayerToggle
         showUnknown={showUnknown}
-        onToggle={(next) => {
+        onToggleUnknown={(next) => {
           setShowUnknown(next)
           if (!next) setUnknownStatus(null)
         }}
+        showShading={showShading}
+        onToggleShading={setShowShading}
         caption={captionFor(showUnknown, unknownStatus)}
       />
 
@@ -619,6 +691,9 @@ export default function MapView() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+          {/* Before the markers, so the canvas lands in the overlay pane and
+              the pins keep the marker pane above it. */}
+          <RegionShadingLayer enabled={showShading} points={heatPoints} />
           <CatchMarkers catches={plottable} />
           <NearbyUnknownLayer
             enabled={showUnknown}
@@ -642,7 +717,7 @@ export default function MapView() {
         </MapContainer>
       )}
 
-      <MapLegend showUnknown={showUnknown} />
+      <MapLegend showUnknown={showUnknown} showShading={showShading} />
     </section>
   )
 }

@@ -44,6 +44,7 @@ const PRODUCTION_TAXA = [
   ['Pseudotsuga menziesii', TREE],             // Douglas-fir
   ['Acer macrophyllum', TREE],                 // bigleaf maple
   ['Parkinsonia aculeata', TREE],              // Mexican palo verde
+  ['Pistacia atlantica', TREE],                // Mt Atlas mastic (threat)
   ['Berberis aquifolium', SHRUB],              // Oregon grape
   ['Cytisus scoparius', SHRUB],                // Scotch broom (threat)
   ['Rubus armeniacus', SHRUB],                 // Armenian blackberry (threat)
