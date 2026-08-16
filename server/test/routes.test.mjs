@@ -689,6 +689,35 @@ check('a different species is a first catch again', r.body.isFirstCatch === true
 r = await post({ ...CATCH, userId: 'usr_2', taxonId: 126887 })
 check('first catch is per user, not global', r.body.isFirstCatch === true)
 
+console.log('\n-- family + per-family sequential number --')
+resetTable()
+
+r = await post({ ...CATCH, taxonId: 126887, family: 'Berberidaceae' })
+check('family is persisted', r.body.family === 'Berberidaceae', r.body.family)
+check('...and the row agrees', table[0].family === 'Berberidaceae', table[0].family)
+check('the first catch in a family is sequence 1', r.body.familySequence === 1,
+  r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 61317, family: 'Berberidaceae' })
+check('a second species in the same family advances the sequence',
+  r.body.familySequence === 2, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 48472, family: 'Pinaceae' })
+check('a different family starts its own sequence at 1', r.body.familySequence === 1,
+  r.body.familySequence)
+
+r = await post({ ...CATCH, userId: 'usr_fam2', taxonId: 126887, family: 'Berberidaceae' })
+check('the sequence is per user, not shared across users',
+  r.body.familySequence === 1, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 58732 })
+check('no family sent -> family is null, not omitted', r.body.family === null, r.body.family)
+check('...and familySequence is null, not 0 or omitted',
+  r.body.familySequence === null, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 63603, family: '  Fabaceae  ' })
+check('family is trimmed before storage', r.body.family === 'Fabaceae', r.body.family)
+
 console.log('\n-- duplicate suppression --')
 resetTable()
 

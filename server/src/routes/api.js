@@ -545,13 +545,19 @@ router.get('/observations/nearby', async (req, res, next) => {
 
 /**
  * POST /api/catches
- * Body: { userId, taxonId, scientificName, commonName, type, location: { lat, lng },
+ * Body: { userId, taxonId, scientificName, commonName, family, type, location: { lat, lng },
  *         placeId, photoUrl, confidence }
  * Records a capture or a threat report.
  *
  * `location` decides the place, and through it the native/invasive verdict —
  * see resolvePlaceForRequest(). `placeId` is accepted but no longer expected
  * from the capture flow.
+ *
+ * `family` is Pl@ntNet's, passed straight through from the client (see
+ * plantnet.js's mapResult) — unlike scientificName/commonName there is no
+ * iNaturalist family lookup for this route to prefer instead. Trusted at the
+ * same level lat/lng already are: not a classification, so nothing here turns
+ * on it being right.
  */
 router.post('/catches', async (req, res, next) => {
   if (!requireDatabase(res)) return
@@ -662,6 +668,7 @@ router.post('/catches', async (req, res, next) => {
         // and scientific_name is NOT NULL.
         scientific_name: status.scientificName ?? body.scientificName ?? null,
         common_name: status.commonName ?? body.commonName ?? null,
+        family: String(body.family ?? '').trim() || null,
         type,
         place_id: placeId,
         place_name: place.placeName,
@@ -675,6 +682,28 @@ router.post('/catches', async (req, res, next) => {
 
     if (insertError) throw toDatabaseError(insertError)
 
+    // This catch's position within (user_id, family) — "your 3rd Rosaceae
+    // catch." A read after the insert, not a stored counter: the row just
+    // written is already in the table, so counting every row that matches is
+    // both the count and the correct sequence number for it in one query,
+    // with no separate increment step that could drift from reality.
+    //
+    // Only meaningful when this catch carries a family. Rows with no family —
+    // either this client sent none, or the catch predates migration 004 —
+    // don't match `.eq('family', ...)` against anything and so never enter
+    // anyone's count; see that migration's comment for why that's correct.
+    let familySequence = null
+    if (row.family) {
+      const { data: familyRows, error: familyError } = await sb
+        .from('catches')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('family', row.family)
+
+      if (familyError) throw toDatabaseError(familyError)
+      familySequence = familyRows.length
+    }
+
     res.status(201).json({
       id: row.id,
       userId: row.user_id,
@@ -682,6 +711,8 @@ router.post('/catches', async (req, res, next) => {
       taxonId: row.taxon_id,
       scientificName: row.scientific_name,
       commonName: row.common_name,
+      family: row.family,
+      familySequence,
       placeId: row.place_id,
       placeName: row.place_name,
       // Which rule named the place. 'fallback' is the one worth showing a user:
