@@ -380,14 +380,14 @@ router.post('/catches', async (req, res, next) => {
     // history with this taxon:
     //
     //   isFirstCatch — has this user logged this species ANYWHERE before?
-    //                  Drives the dex's new-entry celebration, so it has to be
+    //                  Drives the catalogue's new-entry celebration, so it has to be
     //                  read before the insert or it is always false.
     //   duplicate    — has this user already logged it in THIS place? That is
     //                  the same row twice, and it is how you farm points by
     //                  photographing one blackberry bush repeatedly.
     //
     // The two differ deliberately: the same species in a new region is a real
-    // observation worth recording, just not a new dex entry.
+    // observation worth recording, just not a new catalogue entry.
     const { data: existing, error: existingError } = await sb
       .from('catches')
       .select('id, place_id')
@@ -467,7 +467,7 @@ router.post('/catches', async (req, res, next) => {
  *
  * Both filters are optional and AND together when both are given:
  *   (none)                    every row, capped at SCAN_LIMIT
- *   ?userId=usr_1             one user's history, anywhere  -> the dex
+ *   ?userId=usr_1             one user's history, anywhere  -> the catalogue
  *   ?placeId=10               everything logged in a place  -> the map
  *   ?userId=usr_1&placeId=10  one user's history in a place
  *
@@ -477,7 +477,7 @@ router.post('/catches', async (req, res, next) => {
  * to keep in sync.
  *
  * Rows with a null lat/lng are included. A catch recorded without geolocation
- * is still a real observation and still belongs in the dex — deciding what is
+ * is still a real observation and still belongs in the catalogue — deciding what is
  * mappable is the map's job, not this endpoint's.
  *
  * Index note: the filters and the sort are shaped to match the indexes in
@@ -653,7 +653,7 @@ router.post('/users', async (req, res, next) => {
  *                      included — the same sense of "catches" that
  *                      GET /api/catches uses.
  *   uniqueSpeciesCount distinct taxa, so the same species logged in two places
- *                      is one entry in the dex. This is what the profile shows
+ *                      is one entry in the catalogue. This is what the profile shows
  *                      as "Owned".
  *   totalPoints        POINTS applied per row, from the same table the award
  *                      on POST /catches reads.

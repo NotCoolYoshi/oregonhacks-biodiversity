@@ -1,0 +1,80 @@
+/* ---------------------------------------------------------------------------
+   Tide & Timber — light field-guide theme
+
+   The single home for colour in this app. Two layers:
+
+   1. Palette      the six brand values, named for what they *are*.
+   2. Semantics    what the rest of the CSS actually references, named for what
+                   they are *used for*.
+
+   Only ever reference the semantic layer outside this file, so a palette tweak
+   is one edit here rather than another find-and-replace across every view.
+
+   Contrast (WCAG 2.1, sRGB):
+     text-primary on field ........ 11.3:1   AAA
+     text-muted   on field .........  5.8:1   AA
+     text-primary on surface-blue .. 12.1:1   AAA
+     text-muted   on surface-blue ...  6.1:1   AA
+     white        on deep-green .... 10.8:1   AAA
+     text-primary on accent-yellow ..  10.0:1   AAA
+     accent-yellow on deep-green ....  7.1:1   AA (large + small)
+
+   Two pairings fail and are deliberately never used: white on accent-yellow
+   (1.5:1) and accent-yellow as *text* on the field green (1.1:1). Yellow is a
+   fill here — a badge, a stat block, a highlight bar — and only ever becomes a
+   foreground colour on top of deep green.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Palette ---------------------------------------------------------------- */
+  --color-field: #cfe6bb; /* light green — the page itself */
+  --color-surface-blue: #d9e8ec; /* pale blue — default card surface */
+  --color-deep-green: #1a4531; /* buttons, nav, active states, stat blocks */
+  --color-accent-yellow: #f0cf6b; /* points, badges, health numbers */
+  --color-text-primary: #0f2b1d; /* headings on light backgrounds */
+  --color-text-muted: #3b5b33; /* supporting text on light backgrounds */
+
+  /* Derived ---------------------------------------------------------------- */
+  /* A deep-green tint rather than a grey: a neutral hairline reads as dirt
+     against the field green. */
+  --color-line: color-mix(in srgb, var(--color-deep-green) 22%, transparent);
+  --color-line-strong: color-mix(in srgb, var(--color-deep-green) 45%, transparent);
+  --color-deep-green-soft: color-mix(in srgb, var(--color-deep-green) 10%, transparent);
+
+  /* Status greens/oranges for catch vs. threat. Kept out of the brand palette
+     on purpose — these encode meaning, not identity, and must stay distinct
+     from the deep green that every button already uses. */
+  --color-native: #1f7a4d;
+  --color-native-bg: rgba(31, 122, 77, 0.14);
+  --color-threat: #b25f10;
+  --color-threat-bg: rgba(178, 95, 16, 0.14);
+
+  /* Semantics -------------------------------------------------------------- */
+  --text: var(--color-text-muted);
+  --text-h: var(--color-text-primary);
+  --bg: var(--color-field);
+  --surface: var(--color-surface-blue);
+  /* Reserved for cards that sit *on* a blue surface, or that carry a photo and
+     need the quietest possible frame. */
+  --surface-raised: #ffffff;
+  --border: var(--color-line);
+  --code-bg: color-mix(in srgb, var(--color-surface-blue) 70%, #fff);
+
+  /* `accent` is the interactive colour — buttons, active nav, focus rings.
+     Deep green, not yellow: yellow cannot carry white text or sit as text on
+     the field, so it makes a poor primary action colour. */
+  --accent: var(--color-deep-green);
+  --accent-on: #ffffff;
+  --accent-bg: var(--color-deep-green-soft);
+  --accent-border: var(--color-line-strong);
+
+  /* `highlight` is the emphasis colour — numbers worth looking at, badges,
+     progress fills. Always a fill; see the contrast note above. */
+  --highlight: var(--color-accent-yellow);
+  --highlight-on: var(--color-text-primary);
+
+  --social-bg: color-mix(in srgb, var(--color-surface-blue) 55%, transparent);
+  --shadow:
+    rgba(15, 43, 29, 0.12) 0 10px 15px -3px, rgba(15, 43, 29, 0.07) 0 4px 6px -2px;
+  --radius: 12px;
+}

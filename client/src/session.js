@@ -1,6 +1,6 @@
 // Who the current user is, in the absence of any auth.
 //
-// The server takes `userId` on POST /api/catches and groups the dex and the
+// The server takes `userId` on POST /api/catches and groups the catalogue and the
 // region score by it. There are no accounts yet, so the browser makes one up
 // on first use and keeps it in localStorage — a catch made today is still
 // yours tomorrow, on this device, in this browser.

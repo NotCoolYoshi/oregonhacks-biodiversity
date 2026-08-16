@@ -1,4 +1,28 @@
+/* ---------------------------------------------------------------------------
+   Forest backdrop
+
+   Fixed to the viewport rather than scrolled with the page: the scene is a
+   horizon, and a horizon that slides up and away as you scroll reads as a
+   decorative band instead of as the ground the app is standing on.
+   --------------------------------------------------------------------------- */
+
+.forest-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none; /* Never intercepts a tap meant for the map or a card. */
+  overflow: hidden;
+}
+
+.forest-backdrop svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .app {
+  position: relative;
+  z-index: 1; /* Above the forest backdrop, which is z-index 0 inside #root. */
   /* #root is a column flex container, and an auto cross-axis margin cancels
      the default `align-items: stretch`. Without this the box shrink-wraps its
      content to ~305px and max-width never comes into play — every view renders
@@ -7,7 +31,10 @@
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
+  /* Bottom padding clears the floating tab bar (its height + the gap it sits
+     above the viewport edge) so the last element of a view is never hidden
+     underneath it. */
+  padding: 1.5rem 1rem calc(7rem + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   text-align: left;
 }
@@ -17,20 +44,146 @@
   font-size: 1.5rem;
 }
 
+/* ---------------------------------------------------------------------------
+   Bottom tab bar
+
+   A floating pill docked to the bottom of the viewport rather than a full-width
+   strip: #root is a centred 1126px column with side borders, so a bar pinned
+   edge-to-edge would read as belonging to the page behind it instead of to the
+   app column.
+   --------------------------------------------------------------------------- */
+
 .nav {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 500; /* Leaflet's own panes top out at 400. */
+  width: min(30rem, calc(100% - 1.6rem));
+  border: 1px solid color-mix(in srgb, #000 20%, var(--color-deep-green));
+  border-radius: 999px;
+  /* Solid deep green rather than a translucent tint of the page: the tab bar
+     floats over the map, and a see-through bar over satellite tiles loses the
+     contrast the labels depend on. */
+  background: color-mix(in srgb, var(--color-deep-green) 94%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .nav {
+    background: var(--color-deep-green);
+  }
+}
+
+.nav-list {
   display: flex;
-  gap: 1rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.3);
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
 }
 
-.nav a {
+.nav-list li {
+  flex: 1;
+}
+
+.nav-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.45rem 0.2rem 0.4rem;
+  border-radius: 999px;
   text-decoration: none;
+  /* On the deep-green bar, not on the page — a light tint of the field green
+     rather than --text, which is tuned for the opposite background. 5.8:1. */
+  color: color-mix(in srgb, var(--color-field) 80%, var(--color-deep-green));
+  font-size: 0.7rem;
+  letter-spacing: 0.2px;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
 }
 
-.nav a.active {
-  font-weight: 700;
-  text-decoration: underline;
+/* "Catalogue" is three times the length of the "Dex" this replaced. Wrapping it
+   would make the tab two lines tall and shove every icon in the bar upward, so
+   it is held on one line and the breakpoint below drops labels entirely once
+   they no longer fit. */
+.nav-label {
+  white-space: nowrap;
+}
+
+.nav-icon {
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  transition: transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.nav-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.nav-tab:hover {
+  color: #fff;
+}
+
+.nav-tab:hover .nav-icon {
+  transform: translateY(-2px);
+}
+
+/* Yellow, not --accent: the ring sits on the deep-green bar, where deep green
+   is invisible. */
+.nav-tab:focus-visible {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+}
+
+.nav-tab.active {
+  color: var(--highlight);
+  background: color-mix(in srgb, #fff 14%, transparent);
+}
+
+.nav-tab.active .nav-icon {
+  transform: translateY(-1px);
+}
+
+.nav-tab.active .nav-label {
+  font-weight: 600;
+}
+
+/* On narrow phones five labels no longer fit side by side, so show icons only.
+   Raised from 22rem with the Dex -> Catalogue rename: the longest label grew
+   from 3 characters to 9, and 360px-wide phones sit right on the edge.
+   Clipped rather than `display: none` — the icon is aria-hidden, so removing
+   the label from the a11y tree would leave the link unnamed. */
+@media (max-width: 24rem) {
+  .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .nav-tab {
+    padding: 0.55rem 0.2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-tab,
+  .nav-icon {
+    transition: none;
+  }
+
+  .nav-tab:hover .nav-icon,
+  .nav-tab.active .nav-icon {
+    transform: none;
+  }
 }
 
 .main {
@@ -54,10 +207,17 @@
   font-size: 0.95rem;
   padding: 0.6rem 1.1rem;
   border-radius: 8px;
-  border: 1px solid var(--accent-border);
+  border: 1px solid transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-on);
   cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.capture button:hover:not(:disabled) {
+  background: color-mix(in srgb, #000 12%, var(--accent));
 }
 
 .capture button:disabled {
@@ -68,7 +228,11 @@
 .capture button.capture-secondary {
   background: transparent;
   color: var(--text-h);
-  border-color: var(--border);
+  border-color: var(--accent-border);
+}
+
+.capture button.capture-secondary:hover:not(:disabled) {
+  background: var(--accent-bg);
 }
 
 .capture-actions {
@@ -90,8 +254,8 @@
   font-size: 0.85rem;
   padding: 0.6rem 0.8rem;
   border-radius: 8px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-h);
 }
 
@@ -99,11 +263,12 @@
 
 .capture-organs {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 0.9rem 1rem 1rem;
   margin: 0;
   width: 100%;
   box-sizing: border-box;
+  background: var(--surface);
 }
 
 .capture-organs legend {
@@ -129,16 +294,24 @@
   cursor: pointer;
   font-size: 0.9rem;
   color: var(--text-h);
+  background: var(--surface-raised);
 }
 
+/* Filled deep green rather than a tint — the chips sit on a blue card, and a
+   10% wash of the accent is not separable from the card at a glance. */
 .capture-chips label.is-selected {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-on);
 }
 
 .capture-chips input {
   margin: 0;
   accent-color: var(--accent);
+}
+
+.capture-chips label.is-selected input {
+  accent-color: var(--highlight);
 }
 
 /* File input -------------------------------------------------------------- */
@@ -147,11 +320,17 @@
   display: inline-flex;
   align-items: center;
   padding: 0.7rem 1.1rem;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  border: 1px dashed var(--accent-border);
+  border-radius: var(--radius);
   cursor: pointer;
   color: var(--text-h);
   font-size: 0.95rem;
+  background: var(--surface);
+  transition: background-color 0.18s ease;
+}
+
+.capture-file:hover {
+  background: var(--surface-raised);
 }
 
 .capture-file input {
@@ -161,55 +340,10 @@
 .capture-preview {
   max-width: 100%;
   max-height: 16rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  border: 3px solid var(--surface-raised);
+  box-shadow: var(--shadow);
   object-fit: cover;
-}
-
-/* Candidate list ---------------------------------------------------------- */
-
-.capture-candidates {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.capture-candidates button {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  width: 100%;
-  padding: 0.6rem;
-  text-align: left;
-  background: transparent;
-  color: var(--text-h);
-  border: 1px solid var(--border);
-}
-
-.capture-candidates button:hover {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
-}
-
-.capture-candidates img,
-.capture-thumb-placeholder {
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: 8px;
-  object-fit: cover;
-  flex: none;
-  background: var(--code-bg);
-}
-
-.capture-candidate-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  font-size: 0.9rem;
 }
 
 /* Verdict panels ---------------------------------------------------------- */
@@ -218,8 +352,9 @@
   width: 100%;
   box-sizing: border-box;
   padding: 0.9rem 1rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -229,14 +364,17 @@
   color: var(--text-h);
 }
 
+/* Catch and threat keep their own green/orange rather than taking the brand
+   palette: this pair is the app's one piece of semantic colour, and folding it
+   into the deep green every button already uses would erase the distinction. */
 .capture-verdict.is-native {
-  border-color: rgba(34, 160, 90, 0.5);
-  background: rgba(34, 160, 90, 0.1);
+  border-left: 4px solid var(--color-native);
+  background: var(--color-native-bg);
 }
 
 .capture-verdict.is-threat {
-  border-color: rgba(214, 120, 20, 0.5);
-  background: rgba(214, 120, 20, 0.12);
+  border-left: 4px solid var(--color-threat);
+  background: var(--color-threat-bg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -260,9 +398,9 @@
   align-items: center;
   gap: 1rem;
   padding: 0.8rem 1rem;
-  border-radius: 10px;
-  border: 1px solid rgba(34, 160, 90, 0.5);
-  background: rgba(34, 160, 90, 0.1);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .home-tip .tip-icon {
@@ -322,26 +460,30 @@
   line-height: 1.4;
 }
 
+/* Stat block: deep green slab, yellow numeral. The one place yellow is used as
+   a foreground colour, and it only works because the slab underneath it is
+   deep green (7.1:1). */
 .score-display {
   display: flex;
   align-items: center;
   gap: 1.5rem;
   padding: 1.2rem;
-  border-radius: 10px;
-  border: 1px solid var(--accent-border);
-  background: var(--accent-bg);
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--color-deep-green);
 }
 
 .score-value {
   font-size: 2.5rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--highlight);
   min-width: 6rem;
   text-align: center;
+  line-height: 1.1;
 }
 
 .score-label {
-  color: var(--text-h);
+  color: color-mix(in srgb, var(--color-field) 88%, var(--color-deep-green));
   font-size: 0.9rem;
 }
 
@@ -357,18 +499,28 @@
   align-items: center;
   gap: 0.7rem;
   padding: 1.2rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
+  background: var(--surface);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
   text-align: center;
 }
 
 .action-card:hover {
   border-color: var(--accent-border);
-  background: var(--accent-bg);
+  background: var(--surface-raised);
   transform: translateY(-2px);
   box-shadow: var(--shadow);
+}
+
+.action-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .action-card .action-icon {
@@ -400,11 +552,15 @@
   opacity: 0.5;
 }
 
+/* Flat pale blue with a deep-green rim — the brief's flat-shape direction, and
+   a gradient here would be the only one in the app. */
 .avatar {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-bg));
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
@@ -457,7 +613,7 @@
   font-size: 1rem;
   font-weight: 500;
   color: var(--text-h);
-  background: var(--accent-bg);
+  background: var(--surface-raised);
   border: 1px solid var(--accent);
   border-radius: 4px;
   padding: 0.1rem 0.3rem;
@@ -512,13 +668,13 @@
 
 .map-pin-catch .map-pin-shape,
 .map-swatch-catch {
-  background: rgb(34, 160, 90);
+  background: var(--color-native);
   border-radius: 50%;
 }
 
 .map-pin-threat .map-pin-shape,
 .map-swatch-threat {
-  background: rgb(214, 120, 20);
+  background: var(--color-threat);
   border-radius: 2px;
   transform: rotate(45deg);
 }
@@ -537,9 +693,537 @@
 }
 
 .map-popup-catch {
-  color: rgb(24, 120, 66);
+  color: var(--color-native);
 }
 
 .map-popup-threat {
-  color: rgb(170, 92, 12);
+  color: var(--color-threat);
+}
+
+/* ---------------------------------------------------------------------------
+   Region stat strip (Map)
+
+   Inherited from the removed Region dashboard. Deep-green slabs with yellow
+   numerals — the one pairing in the palette where yellow can be a foreground
+   colour (7.1:1).
+   --------------------------------------------------------------------------- */
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.stat {
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius);
+  background: var(--color-deep-green);
+  text-align: center;
+}
+
+.stat dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-field) 82%, var(--color-deep-green));
+}
+
+.stat dd.stat-value {
+  margin: 0.2rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--highlight);
+}
+
+/* Three slabs of "Threats reported" wrap to two lines each on a narrow phone.
+   Stacking keeps each label on one line and each number legible. */
+@media (max-width: 26rem) {
+  .stat-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .stat dd.stat-value {
+    margin: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Social
+   --------------------------------------------------------------------------- */
+
+.social {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  max-width: 40rem;
+}
+
+.social-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.social-section h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+.social-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Yellow as a fill with dark text on it, never yellow text on the page. */
+.badge-placeholder {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--highlight);
+  color: var(--highlight-on);
+}
+
+.leaderboard {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.leader-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.leader-row.is-first {
+  border-color: var(--highlight);
+  background: var(--surface-raised);
+}
+
+.leader-rank {
+  flex: none;
+  width: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+
+.leader-row.is-first .leader-rank {
+  color: var(--text-h);
+}
+
+.leader-avatar {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  border: 2px solid var(--accent);
+  box-sizing: border-box;
+}
+
+.leader-row.is-first .leader-avatar {
+  background: var(--highlight);
+}
+
+.leader-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-h);
+  font-size: 0.95rem;
+}
+
+.leader-meta {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.leader-points {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+/* Empty states -------------------------------------------------------------- */
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.1rem 1rem;
+  border-radius: var(--radius);
+  /* Dashed rather than solid: the section is a placeholder, and the border is
+     the cheapest way to say so without a second label on every one of them. */
+  border: 1px dashed var(--accent-border);
+  background: var(--social-bg);
+}
+
+.empty-icon {
+  font-size: 1.5rem;
+  flex: none;
+  opacity: 0.75;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Retry attempt ring (capture flow)
+
+   Presentation for the confidence gate's ladder. The arc is deep green — a
+   thin graphical element needs 3:1 against the page under WCAG 1.4.11, and
+   the accent yellow manages 1.1:1 on the field green.
+   --------------------------------------------------------------------------- */
+
+.attempt-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.attempt-ring {
+  position: relative;
+  flex: none;
+  width: 4rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+}
+
+.attempt-ring svg {
+  width: 100%;
+  height: 100%;
+  /* Start the arc at twelve o'clock instead of three. */
+  transform: rotate(-90deg);
+}
+
+.attempt-ring circle {
+  fill: none;
+  stroke-width: 5;
+}
+
+.attempt-ring-track {
+  stroke: color-mix(in srgb, var(--color-deep-green) 20%, transparent);
+}
+
+.attempt-ring-arc {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.45s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.3s ease;
+}
+
+/* Last attempt: the ring shifts to the threat orange, so running out of
+   photos is legible before reading the sentence next to it. */
+.attempt-ring.is-last .attempt-ring-arc {
+  stroke: var(--color-threat);
+}
+
+.attempt-ring-count {
+  position: absolute;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-h);
+  line-height: 1;
+}
+
+.attempt-ring-count small {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attempt-ring-arc {
+    transition: none;
+  }
+}
+
+/* Visible to screen readers only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Catalogue
+   --------------------------------------------------------------------------- */
+
+.catalogue {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 44rem;
+}
+
+.catalogue-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.catalogue-section h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-h);
+}
+
+/* Species flip cards ------------------------------------------------------- */
+
+.species-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+}
+
+.species-card {
+  /* Reset the button chrome; the faces inside carry all the styling. */
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  /* The flip needs depth on the parent of the rotating element, not on the
+     element itself. */
+  perspective: 900px;
+  height: 8.5rem;
+}
+
+.species-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius);
+}
+
+.species-card-inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.species-card.is-flipped .species-card-inner {
+  transform: rotateY(180deg);
+}
+
+.species-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.85rem;
+  box-sizing: border-box;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  /* Chrome and Safari still want the prefix here; without it both faces paint
+     and the back shows through the front as mirrored text. */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.species-front {
+  background: var(--surface);
+  align-items: center;
+  text-align: center;
+}
+
+.species-back {
+  background: var(--color-deep-green);
+  transform: rotateY(180deg);
+}
+
+.species-card.is-threat .species-front {
+  border-left: 4px solid var(--color-threat);
+}
+
+.species-icon {
+  font-size: 1.6rem;
+}
+
+.species-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  line-height: 1.25;
+}
+
+.species-count {
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.species-sci {
+  font-style: italic;
+  font-size: 0.85rem;
+  font-weight: 600;
+  /* On the deep-green face, so it takes the light end of the palette. */
+  color: #fff;
+  line-height: 1.3;
+}
+
+.species-meta {
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--color-field) 85%, var(--color-deep-green));
+}
+
+/* Without a flip, the two faces would sit on top of each other with no way to
+   tell which is showing. Cross-fade in place instead. */
+@media (prefers-reduced-motion: reduce) {
+  .species-card-inner,
+  .species-card.is-flipped .species-card-inner {
+    transform: none;
+    transition: none;
+  }
+
+  .species-face {
+    backface-visibility: visible;
+    transition: opacity 0.15s linear;
+  }
+
+  .species-back {
+    transform: none;
+    opacity: 0;
+  }
+
+  .species-card.is-flipped .species-front {
+    opacity: 0;
+  }
+
+  .species-card.is-flipped .species-back {
+    opacity: 1;
+  }
+}
+
+/* Milestones --------------------------------------------------------------- */
+
+.milestones {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.milestone {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.milestone-icon {
+  font-size: 1.35rem;
+  flex: none;
+  /* Locked milestones read as not-yet-earned without relying on colour. */
+  filter: grayscale(1);
+  opacity: 0.5;
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+.milestone.is-unlocked {
+  border-color: var(--highlight);
+  background: var(--surface-raised);
+}
+
+.milestone.is-unlocked .milestone-icon {
+  filter: none;
+  opacity: 1;
+}
+
+.milestone-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.milestone-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-h);
+}
+
+.milestone-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.milestone-track {
+  display: block;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-deep-green) 15%, transparent);
+  overflow: hidden;
+}
+
+/* Filled by transform rather than width: scaleX composites on the GPU and does
+   not lay the page out again on every frame. */
+.milestone-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.milestone.is-unlocked .milestone-fill {
+  background: var(--highlight);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .milestone-fill,
+  .milestone-icon {
+    transition: none;
+  }
 }

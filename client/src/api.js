@@ -42,7 +42,7 @@ export const createCatch = (body) => api.post('/api/catches', body).then((r) => 
  * GET /api/catches?userId=&placeId= — recorded catches, newest first.
  *
  * Both params are optional and AND together: pass `placeId` for the map's
- * "everything logged here", `userId` for the dex's "everything I have found".
+ * "everything logged here", `userId` for the catalogue's "everything I have found".
  * Rows come back in the database's snake_case (taxon_id, common_name, lat, …),
  * unlike createCatch's camelCase response.
  *

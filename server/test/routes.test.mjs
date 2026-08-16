@@ -341,7 +341,7 @@ resetTable()
 r = await post({ ...CATCH, taxonId: 126887 })
 check('first ever sighting is a first catch', r.body.isFirstCatch === true)
 
-// Same species, different place: a real observation, but not a new dex entry.
+// Same species, different place: a real observation, but not a new catalogue entry.
 r = await post({ ...CATCH, taxonId: 126887, placeId: 962 })
 check('same species in a new place still records', r.status === 201, r.status)
 check('...but is not a first catch', r.body.isFirstCatch === false)
@@ -516,7 +516,7 @@ r = await getScore('not-a-place')
 check('non-numeric placeId -> 400', r.status === 400, r.status)
 
 // ---------------------------------------------------------------------------
-// GET /api/catches — the list endpoint behind the map and the dex.
+// GET /api/catches — the list endpoint behind the map and the catalogue.
 // ---------------------------------------------------------------------------
 
 // Seeds a row directly, so lat/lng and created_at can be set per row. The
@@ -606,7 +606,7 @@ check('row does not leak user_id', !('user_id' in row), JSON.stringify(row))
 check('row does not leak photo_url', !('photo_url' in row))
 
 // The map filters these out client-side; the endpoint must not do it for it,
-// or the dex silently loses every catch logged without geolocation.
+// or the catalogue silently loses every catch logged without geolocation.
 console.log('\n-- list catches, null coordinates are still returned --')
 resetTable()
 
@@ -732,7 +732,7 @@ await postUser({ userId: 'usr_p', displayName: 'Point Getter' })
 
 // 10 + 10 + 25 + 10 = 55 points across 4 rows and 3 distinct taxa. The fourth
 // row is a species already caught, in another place: a real observation, worth
-// points, but not a new dex entry.
+// points, but not a new catalogue entry.
 seed('usr_p', 126887, 'catch')
 seed('usr_p', 48472, 'catch')
 seed('usr_p', 61317, 'threat_report')

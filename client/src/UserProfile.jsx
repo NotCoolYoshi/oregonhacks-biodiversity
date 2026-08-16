@@ -3,7 +3,7 @@ import { getCurrentUser, updateDisplayName } from './api'
 import { ensureDisplayName, getUserId, setDisplayName } from './session'
 
 /**
- * The profile header: who you are, and how much of the dex you own.
+ * The profile header: who you are, and how much of the catalogue you own.
  *
  * There is no auth, so "current user" is whatever id session.js has in
  * localStorage — it has to be passed to the API explicitly. On first load that
@@ -13,7 +13,7 @@ import { ensureDisplayName, getUserId, setDisplayName } from './session'
  *
  * `Owned` is uniqueSpeciesCount, not catchCount: catching the same species in
  * a second region is a real observation and earns points, but it is not a new
- * entry in the dex, and this line is about the dex.
+ * entry in the catalogue, and this line is about the catalogue.
  */
 export default function UserProfile() {
   const [user, setUser] = useState(null)

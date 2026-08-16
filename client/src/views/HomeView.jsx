@@ -40,7 +40,8 @@ export default function HomeView() {
           <h2>Welcome to Biodiversity</h2>
           <p className="home-description">
             Photograph a plant and find out what it is — then find out whether it 
-            belongs here. Native species go to your dex, invasive species become threat reports.
+            belongs here. Native species go to your catalogue, invasive species become threat
+            reports.
           </p>
         </section>
 
@@ -48,7 +49,10 @@ export default function HomeView() {
           <section className="home-section">
             <h3>Regional Biodiversity Score</h3>
             <div className="score-display">
-              <div className="score-value">{Math.round((score.health_score ?? 0) * 100)}%</div>
+              {/* `score.score` is already 0-100. This read used to be
+                `score.health_score * 100`, a key the endpoint does not return,
+                so the panel showed a flat 0% for every region. */}
+            <div className="score-value">{score.grade === 'N/A' ? '—' : `${score.score}%`}</div>
               <p className="score-label">Region Health</p>
             </div>
           </section>
@@ -61,9 +65,9 @@ export default function HomeView() {
             <p>Identify a plant from a photo</p>
           </div>
 
-          <div className="action-card action-dex" onClick={() => navigate('/dex')}>
+          <div className="action-card action-catalogue" onClick={() => navigate('/catalogue')}>
             <div className="action-icon">📖</div>
-            <h3>Dex</h3>
+            <h3>Catalogue</h3>
             <p>View native species you found</p>
           </div>
 
@@ -73,10 +77,10 @@ export default function HomeView() {
             <p>See recent captures nearby</p>
           </div>
 
-          <div className="action-card action-region" onClick={() => navigate('/region')}>
-            <div className="action-icon">📊</div>
-            <h3>Region</h3>
-            <p>Regional biodiversity dashboard</p>
+          <div className="action-card action-social" onClick={() => navigate('/social')}>
+            <div className="action-icon">🏆</div>
+            <h3>Social</h3>
+            <p>Leaderboard, friends and quests</p>
           </div>
         </section>
       </div>

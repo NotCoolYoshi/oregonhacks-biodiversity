@@ -10,7 +10,7 @@ const REQUEST_TIMEOUT_MS = 20_000
 const MAX_RESULTS = 5
 
 // Below this top score, Pl@ntNet is guessing. Surfacing a 3%-confidence match as
-// a catch would let users fill their dex with noise, so we reject it instead.
+// a catch would let users fill their catalogue with noise, so we reject it instead.
 const MIN_CONFIDENCE = 0.1
 
 // Pl@ntNet needs to know which part of the plant it's looking at. 'auto' lets it

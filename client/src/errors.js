@@ -119,6 +119,27 @@ export function describeIdentifyError(err, organ) {
   }
 }
 
+/**
+ * Copy for the retry ladder in PhotoCapture giving up.
+ *
+ * Only reachable when every attempt came back LOW_CONFIDENCE or NO_MATCH: the
+ * server throws those instead of returning results, so no attempt ever left a
+ * candidate behind to fall back on. A run that saw even one weak-but-real match
+ * proceeds with it instead of landing here.
+ */
+export function describeRetriesExhausted(organ, attempts) {
+  return {
+    code: 'RETRIES_EXHAUSTED',
+    title: `No match after ${attempts} photos`,
+    guidance: WEAK_ORGANS.has(organ)
+      ? 'None of them identified as anything. Leaves and bark look alike across whole genera — ' +
+        'if this plant has a flower or fruit on it, photograph that instead.'
+      : 'None of them identified as anything. Try a single plant against a plain background, ' +
+        'or come back when the light is better.',
+    canRetry: true,
+  }
+}
+
 /** Same idea for POST /api/catches, whose failure modes are entirely different. */
 export function describeSubmitError(err) {
   const data = err?.response?.data ?? {}
@@ -128,7 +149,7 @@ export function describeSubmitError(err) {
     case 'DUPLICATE_CATCH':
       return {
         code: data.code,
-        title: 'Already in your dex',
+        title: 'Already in your catalogue',
         guidance: detail ?? 'You have already logged this species here.',
         canRetry: false,
       }

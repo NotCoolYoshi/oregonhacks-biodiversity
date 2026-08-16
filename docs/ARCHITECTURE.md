@@ -7,8 +7,9 @@ OregonHacks 2026 · Nature + Tech · team of 3
 ```
   ┌─────────────────────────────┐
   │  client  (Vite + React)     │
-  │  ├─ dex / catch UI          │
-  │  └─ map / region view       │
+  │  ├─ catalogue / catch UI    │
+  │  ├─ map / region strip      │
+  │  └─ social / leaderboard    │
   └──────────────┬──────────────┘
                  │  HTTP, JSON only, no third-party keys
                  ▼
@@ -27,19 +28,23 @@ OregonHacks 2026 · Nature + Tech · team of 3
 The client is deliberately split down the middle so two people can work in it at
 once without colliding.
 
-**Dex / catch UI** (`PhotoCapture`, `DexView`) is the game loop. The user
+**Catalogue / catch UI** (`PhotoCapture`, `CatalogueView`) is the game loop. The user
 photographs a plant, the app identifies it, and the result becomes either a
 **catch** (species is native to the region) or a **threat report** (species is
-introduced and flagged invasive). `DexView` shows what's been caught alongside
+introduced and flagged invasive). `CatalogueView` shows what's been caught alongside
 the "catchable nearby" list, so there's always a visible next thing to go find.
 Phenology data drives *in season* badges — a species whose observations peak in
 April shouldn't be dangled in front of the user in November.
 
-**Map / region view** (`MapView`, `RegionDashboard`) is the collective layer.
+**Map / social view** (`MapView`, `SocialView`) is the collective layer.
 `MapView` (Leaflet via react-leaflet) plots every catch and threat report as
-markers, with invasives on their own visually distinct layer. `RegionDashboard`
-renders the regional biodiversity health score plus its native/invasive
-breakdown and recent activity.
+markers, with catches and invasives distinguished by marker shape as well as
+colour, and carries the regional biodiversity health score in a stat strip
+above the map. `SocialView` holds the leaderboard.
+
+There is no separate region dashboard. The health score is a reading of what
+the map is already showing, so it sits on the map rather than on a page of its
+own, and the leaderboard moved to Social.
 
 Both halves talk to the server through `client/src/api.js`, which is the only
 place a URL is written down.
@@ -153,5 +158,5 @@ establishment means on the row would remove that hop; it is not stored today.
 - **How is a region chosen?** Currently an iNaturalist `place_id` (Oregon = 10).
   Reverse-geocoding from the user's coordinates is nicer but is another
   dependency.
-- **Anonymous users?** A dex is more compelling when it persists, but forcing
+- **Anonymous users?** A catalogue is more compelling when it persists, but forcing
   signup before the first catch will lose demo-watchers.

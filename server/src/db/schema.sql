@@ -27,7 +27,7 @@ create table if not exists public.catches (
   scientific_name text        not null,
   common_name     text,
 
-  -- 'catch'         = species is native to this place, goes in the dex
+  -- 'catch'         = species is native to this place, goes in the catalogue
   -- 'threat_report' = species is introduced/invasive, gets flagged
   --
   -- Set server-side from the iNaturalist establishment means, never from the
@@ -47,7 +47,7 @@ create table if not exists public.catches (
 -- GET /api/region/:placeId/score groups by place_id.
 create index if not exists catches_place_id_idx on public.catches (place_id);
 
--- The dex reads one user's catches, newest first.
+-- The catalogue reads one user's catches, newest first.
 create index if not exists catches_user_id_idx on public.catches (user_id);
 create index if not exists catches_user_created_idx
   on public.catches (user_id, created_at desc);
@@ -58,7 +58,7 @@ create index if not exists catches_user_created_idx
 -- race between two concurrent requests.
 --
 -- Scoped to include place_id on purpose: the same species in a new region is
--- still a real observation, just not a new dex entry.
+-- still a real observation, just not a new catalogue entry.
 --
 -- (place_id is nullable, and Postgres treats NULLs as distinct in a unique
 -- index. The route always writes one, defaulting to Oregon, so this holds in

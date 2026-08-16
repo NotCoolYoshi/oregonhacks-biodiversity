@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { identify, getSpeciesStatus, createCatch } from '../api'
 import { getUserId } from '../session'
-import { describeIdentifyError, describeSubmitError } from '../errors'
+import { describeIdentifyError, describeSubmitError, describeRetriesExhausted } from '../errors'
 
 // Every region in this app is Oregon for now. The server defaults to the same
 // id, and there is no place picker to build against yet.
@@ -33,7 +33,94 @@ const ORGANS = [
 // Catching it here buys a message that names the actual problem.
 const MAX_FILE_BYTES = 7 * 1024 * 1024
 
+/**
+ * Top-match score at or above which the app commits to a species by itself.
+ *
+ * Below this the user is asked for a better photo rather than shown a list to
+ * pick from: choosing between "59%" and "12%" is a judgement they have no way
+ * to make, and a wrong pick is a wrong row in the catalogue.
+ */
+const CONFIDENCE_THRESHOLD = 0.75
+
+// Photos to ask for before settling for the best result seen. Past this the
+// nagging is worse than the imprecision.
+const MAX_ATTEMPTS = 5
+
+/**
+ * Shown one at a time on the retry screen, advanced by attempt number.
+ *
+ * Cycled rather than picked at random: rotation cannot repeat itself, and one
+ * concrete instruction per retry reads as advice, where a random draw reads as
+ * the app stalling.
+ */
+const RETRY_TIPS = [
+  'Try getting closer.',
+  'Focus on a single leaf or flower.',
+  'Make sure it’s well-lit.',
+  'Fill more of the frame with the plant.',
+]
+
+/**
+ * Identify failures that another photo could plausibly fix.
+ *
+ * Both are thrown by the server rather than returned (see MIN_CONFIDENCE in
+ * server/src/services/plantnet.js), so they arrive as rejections, not as a thin
+ * result list — but they mean the same thing as a weak top score and belong on
+ * the same retry ladder. Everything else (quota, auth, network) is not the
+ * photo's fault and goes straight to the error screen.
+ */
+const RETRYABLE_CODES = new Set(['LOW_CONFIDENCE', 'NO_MATCH'])
+
 const percent = (score) => `${Math.round((score ?? 0) * 100)}%`
+
+const scoreOf = (candidate) => candidate?.score ?? 0
+
+/**
+ * The retry ladder, drawn as a ring.
+ *
+ * Purely presentational — it reads `attempt` and `total` and decides nothing.
+ * The ladder itself (CONFIDENCE_THRESHOLD, MAX_ATTEMPTS, handleWeakAttempt)
+ * is untouched by this.
+ *
+ * The arc is deep green rather than the accent yellow: it is a thin graphical
+ * element on the field green, where yellow sits at 1.1:1 and disappears. On the
+ * final attempt it turns to the threat orange, so "this is your last photo"
+ * arrives as a colour change and not only as a sentence underneath.
+ */
+const RING_RADIUS = 26
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
+function AttemptRing({ attempt, total }) {
+  const isLast = attempt >= total
+  // Guarded so a ratio above 1 could never render a backwards arc.
+  const progress = Math.min(attempt / total, 1)
+
+  return (
+    <div className={`attempt-ring${isLast ? ' is-last' : ''}`}>
+      <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <circle className="attempt-ring-track" cx="32" cy="32" r={RING_RADIUS} />
+        <circle
+          className="attempt-ring-arc"
+          cx="32"
+          cy="32"
+          r={RING_RADIUS}
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress)}
+        />
+      </svg>
+      {/* The number is in the DOM twice on purpose: once visually inside the
+          ring, once as a full sentence for screen readers, which get nothing
+          useful from "3" on its own. */}
+      <span className="attempt-ring-count" aria-hidden="true">
+        {attempt}
+        <small>/{total}</small>
+      </span>
+      <span className="sr-only">
+        Attempt {attempt} of {total}.
+      </span>
+    </div>
+  )
+}
 
 export default function PhotoCapture() {
   const [phase, setPhase] = useState('idle')
@@ -42,8 +129,14 @@ export default function PhotoCapture() {
   const [photo, setPhoto] = useState(null) // { dataUrl, name }
   const [fileError, setFileError] = useState(null)
 
-  const [candidates, setCandidates] = useState([])
   const [identifySource, setIdentifySource] = useState(null)
+
+  // Retry ladder. All three are per-capture-session and deliberately nowhere
+  // near localStorage: navigating away from /capture unmounts this component
+  // and takes them with it, which is exactly the intended lifetime.
+  const [attempts, setAttempts] = useState(0)
+  const [bestCandidate, setBestCandidate] = useState(null)
+  const [retryTip, setRetryTip] = useState(null)
 
   const [selected, setSelected] = useState(null)
   const [status, setStatus] = useState(null)
@@ -84,20 +177,37 @@ export default function PhotoCapture() {
     }
   }, [])
 
-  const resetToIdle = useCallback((keepOrgan = true) => {
+  /**
+   * Back to the idle screen for another photo, *without* ending the session.
+   *
+   * The retry ladder's own state survives on purpose — this is what "attempt 3
+   * of 5" is counting, so clearing it here would make the ceiling unreachable
+   * and loop forever.
+   */
+  const clearPhoto = useCallback(() => {
     setPhase('idle')
     setPhoto(null)
     setFileError(null)
-    setCandidates([])
     setIdentifySource(null)
-    setSelected(null)
-    setStatus(null)
-    setStatusError(null)
-    setResult(null)
     setError(null)
-    if (!keepOrgan) setOrgan('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
+
+  /** Ends the capture session: everything above, plus the ladder itself. */
+  const resetToIdle = useCallback(
+    (keepOrgan = true) => {
+      clearPhoto()
+      setAttempts(0)
+      setBestCandidate(null)
+      setRetryTip(null)
+      setSelected(null)
+      setStatus(null)
+      setStatusError(null)
+      setResult(null)
+      if (!keepOrgan) setOrgan('')
+    },
+    [clearPhoto],
+  )
 
   function onPickFile(event) {
     const file = event.target.files?.[0]
@@ -121,32 +231,74 @@ export default function PhotoCapture() {
     reader.readAsDataURL(file)
   }
 
+  /**
+   * An attempt that did not clear the bar: ask for another photo, or stop.
+   *
+   * `attempt` and `best` are passed in rather than read from state — both are
+   * set in the same tick as this runs, and a stale read here would either lose
+   * an attempt off the count or discard the result we are about to settle for.
+   */
+  function handleWeakAttempt(attempt, best) {
+    if (attempt < MAX_ATTEMPTS) {
+      setRetryTip(RETRY_TIPS[(attempt - 1) % RETRY_TIPS.length])
+      setPhase('retry')
+      return
+    }
+
+    // Out of attempts. Settle for the strongest match seen across the whole
+    // session, which is not necessarily the one from the last photo.
+    if (best) {
+      pickCandidate(best)
+      return
+    }
+
+    // Every attempt was rejected outright, so there is nothing to settle for.
+    setError(describeRetriesExhausted(organ, attempt))
+    setPhase('error')
+  }
+
   async function runIdentify() {
     if (!photo || !organ) return
 
     setPhase('identifying')
     setError(null)
 
+    const attempt = attempts + 1
+    setAttempts(attempt)
+
     try {
       const response = await identify({ imageBase64: photo.dataUrl, organs: [organ] })
       const results = response.results ?? []
+      setIdentifySource(response.source ?? null)
 
+      // An empty list is the same outcome as a rejected one, and the server
+      // only returns it for mock data — a real Pl@ntNet miss throws NO_MATCH.
       if (results.length === 0) {
-        setError({
-          code: 'NO_MATCH',
-          title: 'No match found',
-          guidance: 'Pl@ntNet returned nothing for that photo. Try another angle.',
-          canRetry: true,
-        })
-        setPhase('error')
+        handleWeakAttempt(attempt, bestCandidate)
         return
       }
 
-      setCandidates(results)
-      setIdentifySource(response.source ?? null)
-      setPhase('candidates')
+      const top = results[0]
+      const best = scoreOf(top) > scoreOf(bestCandidate) ? top : bestCandidate
+      setBestCandidate(best)
+
+      if (scoreOf(top) >= CONFIDENCE_THRESHOLD) {
+        pickCandidate(top)
+        return
+      }
+
+      handleWeakAttempt(attempt, best)
     } catch (err) {
-      setError(describeIdentifyError(err, organ))
+      const described = describeIdentifyError(err, organ)
+
+      // LOW_CONFIDENCE and NO_MATCH carry no results with them, so they cost an
+      // attempt without ever improving `bestCandidate`.
+      if (RETRYABLE_CODES.has(described.code)) {
+        handleWeakAttempt(attempt, bestCandidate)
+        return
+      }
+
+      setError(described)
       setPhase('error')
     }
   }
@@ -211,7 +363,7 @@ export default function PhotoCapture() {
         <p className="capture-muted">
           {phase === 'identifying'
             ? 'Matching your photo against Pl@ntNet.'
-            : 'Recording this in your dex.'}
+            : 'Recording this in your catalogue.'}
         </p>
       </section>
     )
@@ -237,41 +389,44 @@ export default function PhotoCapture() {
     )
   }
 
-  if (phase === 'candidates') {
+  if (phase === 'retry') {
     return (
       <section className="capture">
-        <h2>Is it one of these?</h2>
-        {identifySource === 'mock' && (
-          <p className="capture-note">
-            Showing mock identification data — the server has no PLANTNET_API_KEY set.
+        <h2>Not confident enough — let’s try another photo</h2>
+
+        {/* The photo being rejected, so the tip below has something to be about.
+            Still in state at this point — clearPhoto() only drops it on the way
+            back to idle, which is after this screen is gone. */}
+        {photo && (
+          <img className="capture-preview" src={photo.dataUrl} alt="The photo that could not be identified" />
+        )}
+
+        <p className="capture-note">{retryTip}</p>
+
+        <div className="attempt-status">
+          <AttemptRing attempt={attempts} total={MAX_ATTEMPTS} />
+          {/* The ring carries the count; this carries what the count means,
+              which is the part a bare "3/5" cannot say. */}
+          <p className="capture-muted">
+            {attempts === MAX_ATTEMPTS - 1
+              ? 'One more, then we go with the closest match so far.'
+              : `${MAX_ATTEMPTS - attempts} left before we go with the closest match so far.`}
+          </p>
+        </div>
+
+        {bestCandidate && (
+          <p className="capture-muted capture-detail">
+            Closest so far: <em>{bestCandidate.scientificName}</em> at{' '}
+            {percent(bestCandidate.score)}.
           </p>
         )}
 
-        <ul className="capture-candidates">
-          {candidates.map((candidate) => (
-            <li key={candidate.scientificName ?? candidate.gbifId}>
-              <button type="button" onClick={() => pickCandidate(candidate)}>
-                {candidate.imageUrl ? (
-                  <img src={candidate.imageUrl} alt="" loading="lazy" />
-                ) : (
-                  <span className="capture-thumb-placeholder" aria-hidden="true" />
-                )}
-                <span className="capture-candidate-text">
-                  <em>{candidate.scientificName ?? 'Unknown species'}</em>
-                  {candidate.commonNames?.[0] && <span>{candidate.commonNames[0]}</span>}
-                  <span className="capture-muted">
-                    {percent(candidate.score)} match
-                    {candidate.family ? ` · ${candidate.family}` : ''}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-
         <div className="capture-actions">
+          <button type="button" onClick={clearPhoto}>
+            Take another photo
+          </button>
           <button type="button" className="capture-secondary" onClick={() => resetToIdle()}>
-            None of these — retake
+            Start over
           </button>
         </div>
       </section>
@@ -286,6 +441,21 @@ export default function PhotoCapture() {
         <h2>
           <em>{selected.scientificName}</em>
         </h2>
+
+        {/* The only screen left that can carry this warning — the candidate
+            list it used to live on is gone, and mock data scores high enough
+            to come straight here. */}
+        {identifySource === 'mock' && (
+          <p className="capture-note">
+            Showing mock identification data — the server has no PLANTNET_API_KEY set.
+          </p>
+        )}
+
+        <p className="capture-muted">
+          {percent(selected.score)} match
+          {selected.family ? ` · ${selected.family}` : ''}
+          {attempts > 1 ? ` · best of ${attempts} photos` : ''}
+        </p>
 
         {!status && !statusError && <p className="capture-muted">Checking this species…</p>}
 
@@ -320,10 +490,12 @@ export default function PhotoCapture() {
 
         <div className="capture-actions">
           <button type="button" onClick={submitCatch} disabled={!status && !statusError}>
-            {isThreat ? 'Report this threat' : 'Add to my dex'}
+            {isThreat ? 'Report this threat' : 'Add to my catalogue'}
           </button>
-          <button type="button" className="capture-secondary" onClick={() => setPhase('candidates')}>
-            Back to matches
+          {/* Not "back to matches" any more — the user never chose this from a
+              list, so there is no previous screen to return to. */}
+          <button type="button" className="capture-secondary" onClick={() => resetToIdle()}>
+            Start over
           </button>
         </div>
       </section>
@@ -348,7 +520,7 @@ export default function PhotoCapture() {
             +{result.pointsAwarded} points
             {result.isFirstCatch
               ? ' — first time you have logged this species.'
-              : ' — already in your dex from elsewhere.'}
+              : ' — already in your catalogue from elsewhere.'}
           </p>
         </div>
 
