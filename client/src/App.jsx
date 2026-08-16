@@ -47,7 +47,7 @@ export default function App() {
       <PinBanner />
       <div className="app">
         <header className="header">
-          <h1>OregonHacks Biodiversity</h1>
+          <h1>Memoflora</h1>
         </header>
 
         <main className="main">
