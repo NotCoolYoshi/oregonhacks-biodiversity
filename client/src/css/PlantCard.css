@@ -1,3 +1,11 @@
+:root {
+  --plant-N: #96c24e;
+  --plant-R: #57c3c2;
+  --plant-SR: #61649f;
+  --plant-SSR: #ee2c79;
+  --plant-UR: #82202b;
+}
+
 .plant-card {
   position: relative;
   width: 200px;
@@ -34,7 +42,7 @@
   width: 150px;
   height: 150px;
   border-radius: 50%;
-  background-color: #ff0000;
+  background-color: var(--plant-rarity-color, var(--plant-N));
   opacity: 1;
   filter: blur(12px);
   animation: blob-bounce 5s infinite ease;
@@ -46,18 +54,19 @@
   width: calc(100% - 30px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  justify-content: flex-end;
+  gap: 2px;
+  justify-content: flex-start;
   height: 100%;
   padding: 18px 14px 18px;
   box-sizing: border-box;
+  align-items: flex-start;
 }
 
 .plant-card__row {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  color: #2a2a2a;
+  gap: 2px;
+  color: var(--plant-rarity-color, var(--plant-N));
   font-size: 12px;
   line-height: 1.35;
 }
@@ -65,18 +74,18 @@
 .plant-card__row span {
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #4c4c4c;
+  color: var(--plant-rarity-color, var(--plant-N));
 }
 
 .plant-card__row strong {
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1d;
+  color: var(--plant-rarity-color, var(--plant-N));
   word-break: break-word;
 }
 
 .plant-card__row--id {
-  margin-top: auto;
+  margin-top: 0;
 }
 
 @keyframes blob-bounce {
