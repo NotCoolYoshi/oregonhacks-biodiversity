@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { getCurrentUser } from './api'
 import { ensureDisplayName, getUserId } from './session'
 
-const AVATAR_SOURCES = Object.values(
+const DEFAULT_BACKGROUND_SOURCES = Object.values(
+  import.meta.glob('./resources/background/*', { eager: true, import: 'default' }),
+)
+
+const DEFAULT_AVATAR_SOURCES = Object.values(
   import.meta.glob('./resources/avatar/*', { eager: true, import: 'default' }),
 )
 
@@ -45,13 +49,31 @@ export default function UserProfile() {
   }, [userId])
 
   const avatarSrc = useMemo(() => {
-    if (AVATAR_SOURCES.length === 0) return ''
-    const index = hashString(userId) % AVATAR_SOURCES.length
-    return AVATAR_SOURCES[index]
+    if (DEFAULT_AVATAR_SOURCES.length === 0) return ''
+    const index = hashString(userId) % DEFAULT_AVATAR_SOURCES.length
+    return DEFAULT_AVATAR_SOURCES[index]
   }, [userId])
 
+  const backgroundSrc = useMemo(() => {
+    if (DEFAULT_BACKGROUND_SOURCES.length === 0) return ''
+    const index = Math.floor(Math.random() * DEFAULT_BACKGROUND_SOURCES.length)
+    return DEFAULT_BACKGROUND_SOURCES[index]
+  }, [])
+
   return (
-    <div className={`user-profile${loading ? ' user-profile--loading' : ''}`}>
+    <div
+      className={`user-profile${loading ? ' user-profile--loading' : ''}`}
+      style={
+        backgroundSrc
+          ? {
+              backgroundImage: `linear-gradient(rgba(16, 31, 23, 0.22), rgba(16, 31, 23, 0.22)), url(${backgroundSrc})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+            }
+          : undefined
+      }
+    >
       <img
         className={`avatar${loading ? ' avatar--skeleton' : ''}`}
         src={avatarSrc}

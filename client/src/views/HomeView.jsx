@@ -26,7 +26,9 @@ export default function HomeView() {
   return (
     <div className="home">
       <div className="home-header">
-        <UserProfile />
+        <div className="home-profile-glass">
+          <UserProfile />
+        </div>
       </div>
 
       <div className="home-content">
