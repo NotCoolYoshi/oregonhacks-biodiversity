@@ -377,6 +377,34 @@
   background: var(--color-threat-bg);
 }
 
+/* A third state, because native/invasive is not a binary: iNaturalist having
+   no checklist entry for a species here is a real answer and not a quiet
+   "native". Deliberately neutral — colouring it green or orange is exactly the
+   claim we cannot make. */
+.capture-verdict.is-unknown {
+  border-left: 4px solid var(--color-line-strong);
+  background: var(--color-deep-green-soft);
+}
+
+/* The live lookup is still in flight and the badge above it is showing stored
+   history. Quiet on purpose: it qualifies the badge rather than competing. */
+.verdict-checking {
+  font-weight: 400;
+  color: var(--text);
+}
+
+/* Stored history and the live lookup disagree. Set apart from the body text
+   because it is the one line on the card doing real work — reconciling two
+   answers instead of reporting one. */
+.verdict-diverged {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: calc(var(--radius) - 4px);
+  background: color-mix(in srgb, var(--color-accent-yellow) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent-yellow) 60%, transparent);
+  font-size: 0.85rem;
+}
+
 /* ---------------------------------------------------------------------------
    Home view
    --------------------------------------------------------------------------- */
@@ -1289,6 +1317,14 @@
 .sighting-place {
   font-weight: 600;
   color: var(--text-h);
+}
+
+/* What the row stored, when a fresh resolution of its own coordinates
+   disagrees. Struck through: the place did not change, our ability to name it
+   did, and the old name is history rather than an alternative. */
+.sighting-corrected {
+  text-decoration: line-through;
+  opacity: 0.7;
 }
 
 /* Coordinates are reference data, not prose — tabular figures stop the columns
