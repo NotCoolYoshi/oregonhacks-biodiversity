@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import UserProfile from '../UserProfile'
+import UserProfile from '../components/UserProfile'
 import { getRegionScore } from '../api'
 
 const PLACE_ID = 10
@@ -26,7 +26,9 @@ export default function HomeView() {
   return (
     <div className="home">
       <div className="home-header">
-        <UserProfile />
+        <div className="home-profile-glass">
+          <UserProfile />
+        </div>
       </div>
 
       <div className="home-content">
@@ -52,7 +54,7 @@ export default function HomeView() {
           </section>
         )}
 
-        {/* <section className="home-actions">
+        <section className="home-actions">
           <div className="action-card action-capture" onClick={() => navigate('/capture')}>
             <div className="action-icon">📸</div>
             <h3>Capture</h3>
@@ -76,7 +78,7 @@ export default function HomeView() {
             <h3>Social</h3>
             <p>Leaderboard, friends and quests</p>
           </div>
-        </section> */}
+        </section>
       </div>
     </div>
   )

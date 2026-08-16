@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 
 import ForestBackdrop from './ForestBackdrop'
-import PinBanner from './PinBanner'
+import PinBanner from './components/PinBanner'
 import { ICON_REFERENCE } from './iconReference'
 import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
