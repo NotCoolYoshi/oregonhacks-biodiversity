@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 
+import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
 import DexView from './views/DexView'
 import MapView from './views/MapView'
@@ -10,7 +11,8 @@ import './App.css'
 function Nav() {
   return (
     <nav className="nav">
-      <NavLink to="/">Capture</NavLink>
+      <NavLink to="/">Home</NavLink>
+      <NavLink to="/capture">Capture</NavLink>
       <NavLink to="/dex">Dex</NavLink>
       <NavLink to="/map">Map</NavLink>
       <NavLink to="/region">Region</NavLink>
@@ -29,7 +31,8 @@ export default function App() {
 
         <main className="main">
           <Routes>
-            <Route path="/" element={<PhotoCapture />} />
+            <Route path="/" element={<HomeView />} />
+            <Route path="/capture" element={<PhotoCapture />} />
             <Route path="/dex" element={<DexView />} />
             <Route path="/map" element={<MapView />} />
             <Route path="/region" element={<RegionDashboard />} />
