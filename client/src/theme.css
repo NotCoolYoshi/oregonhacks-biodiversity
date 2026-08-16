@@ -40,7 +40,6 @@
   --color-line: color-mix(in srgb, var(--color-deep-green) 22%, transparent);
   --color-line-strong: color-mix(in srgb, var(--color-deep-green) 45%, transparent);
   --color-deep-green-soft: color-mix(in srgb, var(--color-deep-green) 10%, transparent);
-  --color-yellow-soft: color-mix(in srgb, var(--color-accent-yellow) 35%, transparent);
 
   /* Status greens/oranges for catch vs. threat. Kept out of the brand palette
      on purpose — these encode meaning, not identity, and must stay distinct
@@ -73,7 +72,6 @@
      progress fills. Always a fill; see the contrast note above. */
   --highlight: var(--color-accent-yellow);
   --highlight-on: var(--color-text-primary);
-  --highlight-bg: var(--color-yellow-soft);
 
   --social-bg: color-mix(in srgb, var(--color-surface-blue) 55%, transparent);
   --shadow:

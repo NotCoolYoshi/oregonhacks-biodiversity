@@ -105,6 +105,14 @@
     background-color 0.2s ease;
 }
 
+/* "Catalogue" is three times the length of the "Dex" this replaced. Wrapping it
+   would make the tab two lines tall and shove every icon in the bar upward, so
+   it is held on one line and the breakpoint below drops labels entirely once
+   they no longer fit. */
+.nav-label {
+  white-space: nowrap;
+}
+
 .nav-icon {
   display: grid;
   place-items: center;
@@ -146,10 +154,12 @@
   font-weight: 600;
 }
 
-/* On the narrowest phones five labels crowd into two lines each, so show icons
-   only. Clipped rather than `display: none` — the icon is aria-hidden, so
-   removing the label from the a11y tree would leave the link unnamed. */
-@media (max-width: 22rem) {
+/* On narrow phones five labels no longer fit side by side, so show icons only.
+   Raised from 22rem with the Dex -> Catalogue rename: the longest label grew
+   from 3 characters to 9, and 360px-wide phones sit right on the edge.
+   Clipped rather than `display: none` — the icon is aria-hidden, so removing
+   the label from the a11y tree would leave the link unnamed. */
+@media (max-width: 24rem) {
   .nav-label {
     position: absolute;
     width: 1px;
