@@ -49,7 +49,10 @@ export default function HomeView() {
           <section className="home-section">
             <h3>Regional Biodiversity Score</h3>
             <div className="score-display">
-              <div className="score-value">{Math.round((score.health_score ?? 0) * 100)}%</div>
+              {/* `score.score` is already 0-100. This read used to be
+                `score.health_score * 100`, a key the endpoint does not return,
+                so the panel showed a flat 0% for every region. */}
+            <div className="score-value">{score.grade === 'N/A' ? '—' : `${score.score}%`}</div>
               <p className="score-label">Region Health</p>
             </div>
           </section>
@@ -72,12 +75,6 @@ export default function HomeView() {
             <div className="action-icon">🗺️</div>
             <h3>Map</h3>
             <p>See recent captures nearby</p>
-          </div>
-
-          <div className="action-card action-region" onClick={() => navigate('/region')}>
-            <div className="action-icon">📊</div>
-            <h3>Region</h3>
-            <p>Regional biodiversity dashboard</p>
           </div>
         </section>
       </div>

@@ -5,7 +5,6 @@ import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
 import CatalogueView from './views/CatalogueView'
 import MapView from './views/MapView'
-import RegionDashboard from './views/RegionDashboard'
 
 import './App.css'
 
@@ -32,12 +31,6 @@ const ICONS = {
       <path d="M9 3.5v14M15 6.5v14" />
     </>
   ),
-  region: (
-    <>
-      <path d="M4 20V4M4 20h16" />
-      <path d="M8 20v-5M12.5 20V9M17 20v-8" />
-    </>
-  ),
 }
 
 const TABS = [
@@ -45,7 +38,6 @@ const TABS = [
   { to: '/capture', icon: 'capture', label: 'Capture' },
   { to: '/catalogue', icon: 'catalogue', label: 'Catalogue' },
   { to: '/map', icon: 'map', label: 'Map' },
-  { to: '/region', icon: 'region', label: 'Region' },
 ]
 
 function Nav() {
@@ -93,7 +85,6 @@ export default function App() {
             <Route path="/capture" element={<PhotoCapture />} />
             <Route path="/catalogue" element={<CatalogueView />} />
             <Route path="/map" element={<MapView />} />
-            <Route path="/region" element={<RegionDashboard />} />
             <Route path="*" element={<p>Not found.</p>} />
           </Routes>
         </main>

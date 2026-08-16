@@ -284,9 +284,6 @@
   cursor: pointer;
   font-size: 0.9rem;
   color: var(--text-h);
-}
-
-.capture-chips label {
   background: var(--surface-raised);
 }
 
@@ -691,4 +688,60 @@
 
 .map-popup-threat {
   color: var(--color-threat);
+}
+
+/* ---------------------------------------------------------------------------
+   Region stat strip (Map)
+
+   Inherited from the removed Region dashboard. Deep-green slabs with yellow
+   numerals — the one pairing in the palette where yellow can be a foreground
+   colour (7.1:1).
+   --------------------------------------------------------------------------- */
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+}
+
+.stat {
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--radius);
+  background: var(--color-deep-green);
+  text-align: center;
+}
+
+.stat dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-field) 82%, var(--color-deep-green));
+}
+
+.stat dd.stat-value {
+  margin: 0.2rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--highlight);
+}
+
+/* Three slabs of "Threats reported" wrap to two lines each on a narrow phone.
+   Stacking keeps each label on one line and each number legible. */
+@media (max-width: 26rem) {
+  .stat-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    text-align: left;
+  }
+
+  .stat dd.stat-value {
+    margin: 0;
+  }
 }
