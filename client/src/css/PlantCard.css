@@ -18,6 +18,72 @@
   align-items: center;
   justify-content: center;
   box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff;
+  transition: box-shadow 0.3s ease, filter 0.3s ease;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/**
+ * Static border frame using ::before pseudo-element
+ * This creates the visible colored border at all times
+ * Border is static by default, animated only on hover/long-press
+ */
+.plant-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--plant-rarity-color);
+  border-radius: 14px;
+  z-index: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+/**
+ * Animated border overlay using ::after pseudo-element
+ * Only activates on hover/long-press to create flowing animation
+ */
+.plant-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 2px;
+  background: linear-gradient(90deg, var(--plant-rarity-color), transparent, var(--plant-rarity-color));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  z-index: 1;
+  pointer-events: none;
+  animation: none;
+  opacity: 0;
+}
+
+/**
+ * Hover state: start border animation and glow
+ */
+.plant-card:hover {
+  box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff, 0 0 20px var(--plant-rarity-color);
+  filter: brightness(1.05);
+}
+
+.plant-card:hover::after {
+  animation: border-rotate 3s linear infinite;
+  opacity: 1;
+}
+
+/**
+ * Long-press state: start border animation and enhanced glow
+ */
+.plant-card.is-pressed {
+  box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff, 0 0 28px var(--plant-rarity-color);
+  filter: brightness(1.1);
+}
+
+.plant-card.is-pressed::after {
+  animation: border-rotate 3s linear infinite;
+  opacity: 1;
 }
 
 .bg {
@@ -148,5 +214,19 @@
 
   100% {
     transform: translate(-100%, -100%) translate3d(0, 0, 0);
+  }
+}
+
+/**
+ * Border animation: animated gradient border effect
+ * Moves the gradient position to create a flowing border effect
+ */
+@keyframes border-rotate {
+  from {
+    background-position: 0% center;
+  }
+
+  to {
+    background-position: 200% center;
   }
 }

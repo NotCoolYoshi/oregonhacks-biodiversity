@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react'
 import '../css/PlantCard.css'
 
 const EMPTY_PLANT = {
@@ -24,14 +25,56 @@ function getRarityValue(rarity) {
 export default function PlantCard({ plant = EMPTY_PLANT }) {
   const currentPlant = plant ?? EMPTY_PLANT
   const rarity = getRarityValue(currentPlant.rarity)
+  
+  const [isPressed, setIsPressed] = useState(false)
+  const longPressTimerRef = useRef(null)
 
   // Set the CSS custom property for rarity-based coloring
   const plantCardStyle = {
     '--plant-rarity-color': `var(--plant-${rarity})`,
   }
 
+  /**
+   * Handle touch start - begin tracking for long-press.
+   * Long-press threshold: 500ms
+   */
+  const handleTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => {
+      setIsPressed(true)
+    }, 500)
+  }
+
+  /**
+   * Handle touch end - clear timer and remove pressed state.
+   */
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    setIsPressed(false)
+  }
+
+  /**
+   * Handle touch move - cancel long-press if the touch moved.
+   */
+  const handleTouchMove = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+      setIsPressed(false)
+    }
+  }
+
   return (
-    <div className="plant-card" style={plantCardStyle} aria-label="Plant card preview">
+    <div
+      className={`plant-card${isPressed ? ' is-pressed' : ''}`}
+      style={plantCardStyle}
+      aria-label="Plant card preview"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchMove}
+    >
       <div className="blob" aria-hidden="true" />
       <div className="bg" aria-hidden="true" />
 
