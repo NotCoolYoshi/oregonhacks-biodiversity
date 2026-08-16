@@ -146,6 +146,29 @@ export function describeSubmitError(err) {
   const detail = typeof data.error === 'string' ? data.error : null
 
   switch (data.code) {
+    case 'UNAUTHENTICATED':
+      return {
+        code: data.code,
+        title: 'Sign in to log this catch',
+        guidance: 'Catches are tied to your account now — sign in and try again.',
+        canRetry: false,
+      }
+    case 'AUTH_NOT_CONFIGURED':
+      return {
+        code: data.code,
+        title: 'Sign-in is not set up',
+        guidance:
+          'The server has no Clerk key configured, so there is no way to verify who is ' +
+          'submitting this. Nothing is wrong with your photo.',
+        canRetry: false,
+      }
+    case 'DUPLICATE_CATCH':
+      return {
+        code: data.code,
+        title: 'Already in your catalogue',
+        guidance: detail ?? 'You have already logged this species here.',
+        canRetry: false,
+      }
     case 'DB_NOT_CONFIGURED':
       return {
         code: data.code,

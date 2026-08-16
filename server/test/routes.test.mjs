@@ -13,6 +13,46 @@
 process.env.SUPABASE_URL = 'https://test-project.supabase.co'
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_test_key'
 
+// ---------------------------------------------------------------------------
+// Auth
+//
+// requireClerkUser() (server/src/middleware/clerkAuth.js) verifies a real
+// RS256 signature via @clerk/backend's networkless "jwtKey" mode — the same
+// code path production uses when CLERK_JWT_KEY is set, just pointed at a
+// keypair minted for this run instead of one from the Clerk dashboard. This
+// exercises actual signature verification, not a stub of our own middleware.
+// ---------------------------------------------------------------------------
+
+const crypto = (await import('node:crypto')).default
+
+const { publicKey: testPublicKey, privateKey: testPrivateKey } = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicExponent: 0x10001,
+})
+
+process.env.CLERK_SECRET_KEY = 'sk_test_placeholder' // only isConfigured() reads this; verification uses jwtKey below
+// A syntactically valid (but fake) publishable key — @clerk/backend asserts
+// the shape of this even in jwtKey mode, though nothing here talks to the
+// frontend API it decodes to. Format: pk_test_<base64(frontendApi + "$")>.
+process.env.CLERK_PUBLISHABLE_KEY =
+  'pk_test_' + Buffer.from('test.clerk.accounts.dev$').toString('base64')
+process.env.CLERK_JWT_KEY = testPublicKey.export({ type: 'spki', format: 'pem' })
+// No network calls to Clerk from this test run, telemetry included — every
+// host but iNaturalist and Supabase is unstubbed below and throws.
+process.env.CLERK_TELEMETRY_DISABLED = 'true'
+
+const base64url = (input) => Buffer.from(input).toString('base64url')
+
+/** A Clerk-shaped session JWT for `userId`, signed with the keypair above. */
+const signTestToken = (userId, { expiresInSeconds = 3600 } = {}) => {
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const payload = { sub: userId, iat: now, nbf: now - 5, exp: now + expiresInSeconds }
+  const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(payload))}`
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(signingInput), testPrivateKey)
+  return `${signingInput}.${base64url(signature)}`
+}
+
 const realFetch = globalThis.fetch
 
 const express = (await import('express')).default
@@ -457,10 +497,24 @@ const check = (name, cond, extra = '') => {
   else { fail++; console.log(`  FAIL ${name} ${extra}`) }
 }
 
-const post = async (body) => {
+/**
+ * POST /api/catches, authenticated by default.
+ *
+ * `token` defaults to a session for `body.userId` (falling back to 'usr_1')
+ * — this is what every pre-auth test in this file already sends as "who I
+ * am", so signing a token to match keeps them all exercising the same
+ * behaviour they did before requireClerkUser() existed. Pass `token: null`
+ * to test the unauthenticated path, or an explicit token to test a caller
+ * whose session doesn't match the userId it claims in the body.
+ */
+const post = async (body, { token } = {}) => {
+  const authToken = token === null ? null : (token ?? signTestToken(body.userId ?? 'usr_1'))
   const res = await realFetch(`${base}/api/catches`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
     body: JSON.stringify(body),
   })
   return { status: res.status, body: await res.json() }
@@ -801,8 +855,9 @@ check('applied to the new-catch base (20 * 1.2 = 24)', r.body.pointsAwarded === 
   r.body.pointsAwarded)
 
 console.log('\n-- request validation --')
-r = await post({ taxonId: 126887 })
-check('missing userId -> 400', r.status === 400, r.status)
+// userId is no longer a body field to validate — see the auth section below;
+// requireClerkUser() rejects an unauthenticated request before this check
+// ever runs, and an authenticated one always has a userId (Clerk's).
 r = await post({ userId: 'usr_1' })
 check('missing taxonId and scientificName -> 400', r.status === 400, r.status)
 
@@ -810,6 +865,39 @@ resetTable()
 r = await post({ ...CATCH, scientificName: 'Rubus armeniacus' })
 check('scientificName resolves to a taxon id', r.body.taxonId === 61317, r.body.taxonId)
 check('resolved species is still classified server-side', r.body.type === 'threat_report')
+
+console.log('\n-- auth: POST /api/catches --')
+resetTable()
+
+r = await post({ ...CATCH, taxonId: 126887 }, { token: null })
+check('no Authorization header -> 401', r.status === 401, r.status)
+check('...coded UNAUTHENTICATED', r.body.code === 'UNAUTHENTICATED', r.body.code)
+check('an unauthenticated request writes nothing', table.length === 0, table.length)
+
+r = await post({ ...CATCH, taxonId: 126887 }, { token: 'not-a-real-jwt' })
+check('a garbage token -> 401', r.status === 401, r.status)
+
+// The body's userId is not the identity written — see requireClerkUser() and
+// the "Clerk's, not the body's" note on the route itself. A caller signed in
+// as usr_verified but claiming usr_spoofed in the body must not be able to
+// write into usr_spoofed's catalogue.
+r = await post(
+  { ...CATCH, userId: 'usr_spoofed', taxonId: 126887 },
+  { token: signTestToken('usr_verified') },
+)
+check('the row is written under the token\'s userId', r.body.userId === 'usr_verified', r.body.userId)
+check('...not the body\'s claimed userId', r.body.userId !== 'usr_spoofed', r.body.userId)
+check('...and that is what actually landed in the table',
+  table.some((row) => row.user_id === 'usr_verified'), JSON.stringify(table))
+check('nothing was written under the spoofed id',
+  !table.some((row) => row.user_id === 'usr_spoofed'), JSON.stringify(table))
+
+const savedClerkSecretKey = process.env.CLERK_SECRET_KEY
+delete process.env.CLERK_SECRET_KEY
+r = await post({ ...CATCH, taxonId: 126887 })
+check('Clerk unconfigured -> 503, not a crash', r.status === 503, r.status)
+check('...coded AUTH_NOT_CONFIGURED', r.body.code === 'AUTH_NOT_CONFIGURED', r.body.code)
+process.env.CLERK_SECRET_KEY = savedClerkSecretKey
 
 console.log('\n-- region score aggregate --')
 resetTable()
@@ -1100,10 +1188,15 @@ check('empty placeId is treated as absent, not invalid', l.status === 200, l.sta
 // profile header, plus the aggregates it renders.
 // ---------------------------------------------------------------------------
 
-const postUser = async (body) => {
+/** POST /api/users, authenticated by default. Same `token` override as post(). */
+const postUser = async (body, { token } = {}) => {
+  const authToken = token === null ? null : (token ?? signTestToken(body.userId ?? 'usr_1'))
   const res = await realFetch(`${base}/api/users`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
     body: JSON.stringify(body),
   })
   return { status: res.status, body: await res.json() }
@@ -1160,17 +1253,42 @@ check('displayName is trimmed', u.body.displayName === 'Trailing Space',
   JSON.stringify(u.body.displayName))
 
 console.log('\n-- upsert validation --')
-u = await postUser({})
-check('missing userId -> 400', u.status === 400, u.status)
-check('...coded BAD_REQUEST', u.body.code === 'BAD_REQUEST', u.body.code)
-u = await postUser({ userId: '   ' })
-check('whitespace-only userId -> 400', u.status === 400, u.status)
+// userId is no longer a body field to validate — see the auth section below.
+// requireClerkUser() supplies it from the verified token, which is always a
+// non-empty string, so there is no "missing"/"blank" case left to reject.
 u = await postUser({ userId: 'usr_1', displayName: 'x'.repeat(61) })
 check('over-long displayName -> 400', u.status === 400, u.status)
 check('...and the stored name survives the rejection',
   storedUser('usr_1').display_name === 'Trailing Space', storedUser('usr_1').display_name)
 u = await postUser({ userId: 'usr_1', displayName: 'x'.repeat(60) })
 check('exactly at the limit is accepted', u.status === 200, u.status)
+
+console.log('\n-- auth: POST /api/users --')
+
+u = await postUser({ userId: 'usr_1' }, { token: null })
+check('no Authorization header -> 401', u.status === 401, u.status)
+check('...coded UNAUTHENTICATED', u.body.code === 'UNAUTHENTICATED', u.body.code)
+
+u = await postUser({ userId: 'usr_1' }, { token: 'not-a-real-jwt' })
+check('a garbage token -> 401', u.status === 401, u.status)
+
+// Same spoofing check as POST /api/catches: signed in as usr_verified,
+// claiming usr_spoofed in the body.
+u = await postUser(
+  { userId: 'usr_spoofed', displayName: 'Impersonator' },
+  { token: signTestToken('usr_verified') },
+)
+check('the row is written under the token\'s userId', u.body.userId === 'usr_verified', u.body.userId)
+check('...not the body\'s claimed userId', u.body.userId !== 'usr_spoofed', u.body.userId)
+check('...and the spoofed id never got a row', storedUser('usr_spoofed') === undefined,
+  JSON.stringify(usersTable))
+
+const savedUsersClerkSecretKey = process.env.CLERK_SECRET_KEY
+delete process.env.CLERK_SECRET_KEY
+u = await postUser({ userId: 'usr_1' })
+check('Clerk unconfigured -> 503, not a crash', u.status === 503, u.status)
+check('...coded AUTH_NOT_CONFIGURED', u.body.code === 'AUTH_NOT_CONFIGURED', u.body.code)
+process.env.CLERK_SECRET_KEY = savedUsersClerkSecretKey
 
 console.log('\n-- get a user with no row and no catches --')
 resetTable()
