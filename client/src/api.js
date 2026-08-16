@@ -145,3 +145,17 @@ export const updateDisplayName = (userId, displayName) =>
  */
 export const getUserAchievements = (userId) =>
   api.get(`/api/users/${encodeURIComponent(userId)}/achievements`).then((r) => r.data)
+
+/**
+ * GET /api/leaderboard?place_id= — users ranked by total points.
+ *
+ * Resolves to { placeId, placeName, totalResults, capped, standings }, where
+ * each standing is { userId, displayName, totalPoints, nativeSpeciesCount,
+ * invasiveSpeciesCount, uniqueSpeciesCount }. Global unless a placeId is
+ * given. Capped server-side (50) rather than paginated — `capped` says
+ * whether more contributors exist than were returned.
+ */
+export const getLeaderboard = (placeId) =>
+  api
+    .get('/api/leaderboard', { params: placeId ? { place_id: placeId } : {} })
+    .then((r) => r.data)

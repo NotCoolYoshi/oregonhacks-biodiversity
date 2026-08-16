@@ -1,3 +1,7 @@
+import { useEffect, useState } from 'react'
+
+import { getLeaderboard } from '../api'
+
 /**
  * Social — leaderboard, plus shells for the features that follow it.
  *
@@ -6,27 +10,6 @@
  * Quests are visual shells so the page has a shape to grow into, and are
  * deliberately not backed by an invented data model.
  */
-
-/**
- * Placeholder standings. NOT REAL DATA.
- *
- * There is no leaderboard endpoint: the server can return one user's totals
- * (GET /api/users/:userId) but has nothing that ranks users against each other,
- * and no client-side aggregation can invent that. These rows exist so the
- * layout can be designed and reviewed now.
- *
- * TODO: backend not built yet — needs GET /api/leaderboard returning
- * { userId, displayName, totalPoints, uniqueSpeciesCount }[] ranked by points.
- * Swap this constant for that call; the row markup below already matches the
- * shape the profile endpoint uses.
- */
-const PLACEHOLDER_STANDINGS = [
-  { userId: 'placeholder-1', displayName: 'Fern Gully', totalPoints: 1840, uniqueSpeciesCount: 42 },
-  { userId: 'placeholder-2', displayName: 'Mossy Log', totalPoints: 1610, uniqueSpeciesCount: 38 },
-  { userId: 'placeholder-3', displayName: 'Salal Scout', totalPoints: 1395, uniqueSpeciesCount: 31 },
-  { userId: 'placeholder-4', displayName: 'Cedar Wren', totalPoints: 1120, uniqueSpeciesCount: 27 },
-  { userId: 'placeholder-5', displayName: 'Trillium', totalPoints: 940, uniqueSpeciesCount: 22 },
-]
 
 /** A section that has its chrome but no data behind it yet. */
 function EmptySection({ title, icon, children }) {
@@ -44,6 +27,36 @@ function EmptySection({ title, icon, children }) {
 }
 
 export default function SocialView() {
+  // Global leaderboard — no place filter in this UI yet, though the endpoint
+  // supports one (?place_id=) for whenever a regional view is wanted.
+  const [standings, setStandings] = useState([])
+  const [loading, setLoading] = useState(true)
+  // Failure degrades this one section, same as CatalogueView's achievements
+  // fetch — not the whole page. Distinct from "loaded, zero rows", which is
+  // its own, non-error empty state below.
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    getLeaderboard()
+      .then((data) => {
+        if (cancelled) return
+        setStandings(data.standings ?? [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setFailed(true)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="social">
       <h2>Social</h2>
@@ -51,21 +64,31 @@ export default function SocialView() {
       <section className="social-section">
         <h3>Leaderboard</h3>
 
-        <ol className="leaderboard">
-          {PLACEHOLDER_STANDINGS.map((entry, i) => (
-            <li key={entry.userId} className={`leader-row${i === 0 ? ' is-first' : ''}`}>
-              <span className="leader-rank" aria-hidden="true">
-                {i + 1}
-              </span>
-              <span className="leader-avatar" aria-hidden="true" />
-              <span className="leader-name">
-                {entry.displayName}
-                <span className="leader-meta">{entry.uniqueSpeciesCount} species</span>
-              </span>
-              <span className="leader-points">{entry.totalPoints.toLocaleString()}</span>
-            </li>
-          ))}
-        </ol>
+        {loading && <p className="capture-muted">Loading leaderboard…</p>}
+        {!loading && failed && (
+          <p className="capture-muted">Could not load the leaderboard right now.</p>
+        )}
+        {!loading && !failed && standings.length === 0 && (
+          <p className="capture-muted">No one has logged a catch yet — be the first.</p>
+        )}
+
+        {!loading && !failed && standings.length > 0 && (
+          <ol className="leaderboard">
+            {standings.map((entry, i) => (
+              <li key={entry.userId} className={`leader-row${i === 0 ? ' is-first' : ''}`}>
+                <span className="leader-rank" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <span className="leader-avatar" aria-hidden="true" />
+                <span className="leader-name">
+                  {entry.displayName}
+                  <span className="leader-meta">{entry.uniqueSpeciesCount} species</span>
+                </span>
+                <span className="leader-points">{entry.totalPoints.toLocaleString()}</span>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       {/* TODO: backend not built yet. Friends, challenges and quests each need
