@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getCurrentUser } from './api'
-import { ensureDisplayName, getUserId } from './session'
+import { getCurrentUser } from '../api'
+import { ensureDisplayName, getUserId } from '../session'
 
 const DEFAULT_BACKGROUND_SOURCES = Object.values(
   import.meta.glob('./resources/background/*', { eager: true, import: 'default' }),

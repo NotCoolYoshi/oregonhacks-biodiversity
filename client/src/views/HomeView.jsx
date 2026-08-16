@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import UserProfile from '../UserProfile'
+import UserProfile from '../components/UserProfile'
 import { getRegionScore } from '../api'
 
 const PLACE_ID = 10

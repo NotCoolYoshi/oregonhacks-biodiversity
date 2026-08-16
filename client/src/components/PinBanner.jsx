@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ICON_REFERENCE } from './iconReference'
+import { ICON_REFERENCE } from '../iconReference'
 
 export const PIN_TIPS = [
   'Take clear photos of leaves or flowers for better ID results.',
