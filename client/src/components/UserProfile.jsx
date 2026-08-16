@@ -3,11 +3,11 @@ import { getCurrentUser } from '../api'
 import { ensureDisplayName, getUserId } from '../session'
 
 const DEFAULT_BACKGROUND_SOURCES = Object.values(
-  import.meta.glob('./resources/background/*', { eager: true, import: 'default' }),
+  import.meta.glob('../resources/background/*', { eager: true, import: 'default' }),
 )
 
 const DEFAULT_AVATAR_SOURCES = Object.values(
-  import.meta.glob('./resources/avatar/*', { eager: true, import: 'default' }),
+  import.meta.glob('../resources/avatar/*', { eager: true, import: 'default' }),
 )
 
 function hashString(value) {
@@ -26,6 +26,7 @@ export default function UserProfile() {
   useEffect(() => {
     let active = true
 
+    //TODO wait to load database until user has a display name, otherwise the database will be filled with "Explorer" users
     async function loadProfile() {
       try {
         await ensureDisplayName()
