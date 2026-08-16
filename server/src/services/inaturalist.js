@@ -25,6 +25,11 @@ const DEFAULT_PER_PAGE = 20
 // A taxon's establishment means in a place does not change during a hackathon.
 const CACHE_TTL_MS = 10 * 60 * 1000
 
+// Which place a coordinate falls in changes on the timescale of redistricting,
+// not of a demo. Cached far longer than establishment means so the extra hop
+// added to every catch is paid once per area rather than once per capture.
+const PLACE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
 // iNaturalist's establishment_means vocabulary. Anything in THREAT_MEANS is a
 // species that does not belong here, which is what turns a capture into a
 // threat report.
@@ -125,12 +130,12 @@ async function get(path, params = {}) {
 /** Tiny TTL memo — enough to keep a burst of catches off the upstream API. */
 const cache = new Map()
 
-async function cached(key, fn) {
+async function cached(key, fn, ttlMs = CACHE_TTL_MS) {
   const hit = cache.get(key)
   if (hit && hit.expiresAt > Date.now()) return hit.value
 
   const value = await fn()
-  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS })
+  cache.set(key, { value, expiresAt: Date.now() + ttlMs })
   return value
 }
 
@@ -196,6 +201,140 @@ function photoUrl(taxon) {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Places
+// ---------------------------------------------------------------------------
+
+/**
+ * Administrative levels in iNaturalist's `standard` place set, best first.
+ *
+ * State (10) leads on purpose, and not because it is the most precise answer
+ * available — /places/nearby also returns counties (20) and cities. It leads
+ * because it is the level iNaturalist actually maintains species checklists at.
+ * `establishment_means` comes back null for most taxa when you ask about a
+ * county, and readEstablishmentMeans() reads null as 'unknown', which classify()
+ * files as a plain catch. Asking a more precise question would therefore get us
+ * a less useful answer: a confidently-native plant would come back unclassified.
+ *
+ * Country (0) is the last resort rather than an omission — for a coordinate in
+ * a place iNaturalist has no state-equivalent for, a national checklist still
+ * beats defaulting to somewhere the user has never been.
+ */
+const PLACE_ADMIN_PREFERENCE = [10, 20, 0]
+
+// Half-width of the bounding box sent to /places/nearby, in degrees (~1.1km).
+// The endpoint takes a box, not a point; this is the smallest one that reliably
+// comes back with the containing places rather than an empty set.
+const PLACE_BBOX_DEGREES = 0.01
+
+/** Coordinates rounded to the cache's resolution — ~1km, so a walk is one key. */
+const placeCacheKey = (lat, lng) => `place:${lat.toFixed(2)},${lng.toFixed(2)}`
+
+/**
+ * Coordinates -> the iNaturalist place whose species list they should be
+ * checked against.
+ *
+ * This is what makes the native/invasive verdict about where the user actually
+ * is. Before it existed every capture was compared against a fixed place id,
+ * so a palo verde photographed in Arizona was checked against Oregon's
+ * checklist and came back "not native to Oregon" — true, and not the question
+ * anyone asked.
+ *
+ * Returns null rather than throwing when the coordinates land somewhere
+ * iNaturalist has no standard place for (mid-ocean, Antarctica). A caller that
+ * cannot name a place is better off saying so than being handed a guess.
+ *
+ * @param {number} lat
+ * @param {number} lng
+ * @returns {Promise<{ placeId: number, placeName: string, adminLevel: number|null } | null>}
+ */
+export async function resolvePlaceFromCoords(lat, lng) {
+  const latitude = Number(lat)
+  const longitude = Number(lng)
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new INaturalistError(
+      `lat and lng must both be numbers (got "${lat}", "${lng}").`,
+      { status: 400, code: 'BAD_REQUEST' },
+    )
+  }
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    throw new INaturalistError(
+      `lat must be between -90 and 90 and lng between -180 and 180 (got ${latitude}, ${longitude}).`,
+      { status: 400, code: 'BAD_REQUEST' },
+    )
+  }
+
+  return cached(
+    placeCacheKey(latitude, longitude),
+    async () => {
+      const payload = await get('/places/nearby', {
+        nelat: latitude + PLACE_BBOX_DEGREES,
+        nelng: longitude + PLACE_BBOX_DEGREES,
+        swlat: latitude - PLACE_BBOX_DEGREES,
+        swlng: longitude - PLACE_BBOX_DEGREES,
+        per_page: 20,
+      })
+
+      // `community` places are user-drawn — parks, campuses, "Metro Phoenix" —
+      // and carry no admin_level and no checklist. Only `standard` can answer
+      // an establishment-means question, so only `standard` is considered.
+      const standard = payload.results?.standard ?? []
+
+      for (const level of PLACE_ADMIN_PREFERENCE) {
+        const match = standard.find((place) => Number(place.admin_level) === level)
+        if (match?.id) {
+          // display_name disambiguates ("Lane County, OR, US" over "Lane"),
+          // which matters as soon as the app spans more than one state.
+          const name = match.display_name ?? match.name ?? `Place ${match.id}`
+          // Populate the id->name cache too: the place we just named is the one
+          // the score and list routes are about to ask about by id alone.
+          cache.set(`placeName:${match.id}`, {
+            value: name,
+            expiresAt: Date.now() + PLACE_CACHE_TTL_MS,
+          })
+          return { placeId: match.id, placeName: name, adminLevel: level }
+        }
+      }
+
+      return null
+    },
+    PLACE_CACHE_TTL_MS,
+  )
+}
+
+/**
+ * Place id -> display name, for the routes that only ever receive an id.
+ *
+ * Rejects rather than resolving to a placeholder: callers decide their own
+ * fallback, and every one of them already has a better one than a made-up name.
+ */
+export async function getPlaceName(placeId) {
+  const id = Number(placeId)
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new INaturalistError(`placeId must be a positive number (got "${placeId}").`, {
+      status: 400,
+      code: 'BAD_REQUEST',
+    })
+  }
+
+  return cached(
+    `placeName:${id}`,
+    async () => {
+      const payload = await get(`/places/${id}`)
+      const place = payload.results?.[0]
+      if (!place) {
+        throw new INaturalistError(`iNaturalist has no place with id ${id}.`, {
+          status: 404,
+          code: 'PLACE_NOT_FOUND',
+        })
+      }
+      return place.display_name ?? place.name ?? `Place ${id}`
+    },
+    PLACE_CACHE_TTL_MS,
+  )
+}
 
 /**
  * Scientific name -> iNaturalist taxon id.

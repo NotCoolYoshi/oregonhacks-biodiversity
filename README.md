@@ -22,6 +22,11 @@ cp server/.env.example server/.env
 # then open server/.env and fill in PLANTNET_API_KEY
 # (get a free key at https://my.plantnet.org/)
 
+# create the storage bucket catch photos live in (idempotent; needs the
+# Supabase keys in server/.env). The SQL in server/src/db/ is still applied by
+# hand in the Supabase SQL editor — see the header of schema.sql.
+npm --prefix server run setup:storage
+
 # run client + server together
 npm run dev
 ```
@@ -46,11 +51,27 @@ that talks to external APIs. See `docs/ARCHITECTURE.md` for why.
 | Method | Route | Description |
 |---|---|---|
 | `POST` | `/api/identify` | Identify a plant from a photo; returns ranked candidate species. Proxies Pl@ntNet. |
-| `GET` | `/api/species/:taxonId/status?place_id=` | Establishment means + conservation status for a taxon in a place — decides catch vs. threat report. |
-| `GET` | `/api/species/:taxonId/phenology?place_id=` | Monthly observation histogram; which months this species is typically visible. |
+| `GET` | `/api/places/resolve?lat=&lng=` | Coordinates → the iNaturalist place whose species list applies there. |
+| `GET` | `/api/species/:taxonId/status?lat=&lng=` | Establishment means + conservation status for a taxon **where the photo was taken** — decides catch vs. threat report. |
+| `GET` | `/api/species/:taxonId/phenology?lat=&lng=` | Monthly observation histogram; which months this species is typically visible. |
 | `GET` | `/api/region/:placeId/nearby` | Species recently observed near a place — the "catchable nearby" list. |
-| `POST` | `/api/catches` | Record a catch or a threat report. |
+| `POST` | `/api/catches` | Record a catch or a threat report, uploading its photo to storage. |
+| `GET` | `/api/catches?userId=&placeId=` | Recorded catches, newest first, with photo URLs. |
 | `GET` | `/api/region/:placeId/score` | Aggregated biodiversity health score for a region. |
+
+The place a verdict is about comes from the submitted coordinates, not a
+constant — pass `lat`/`lng` and the server resolves the rest. A request with
+neither falls back and reports `placeSource: "fallback"` so the UI can say the
+verdict is not local.
+
+### Photo storage
+
+Catch photos go in the Supabase storage bucket **`catch-photos`**: public read,
+`image/jpeg` only, 5 MB ceiling. Uploads are server-side with the service role
+key — there is no anonymous write policy and the client holds no Supabase
+credential. The browser resizes to 1600px on the long edge and re-encodes at 80%
+JPEG (`client/src/image.js`) before anything is sent, which takes a 12-megapixel
+phone photo from ~1.5 MB to ~300 KB.
 
 Every route is stubbed with realistic mock JSON (`server/src/mocks.js`) and a
 `TODO` where the real call goes — build against these shapes now, swap in real
@@ -73,7 +94,9 @@ other two.
 ```
 client/          Vite + React app
   src/api.js       every server call, in one place
-  src/views/       PhotoCapture, CatalogueView, MapView, SocialView
+  src/image.js     canvas resize + JPEG re-encode, before any upload
+  src/sighting.js  season, distance, and coordinate helpers
+  src/views/       PhotoCapture, CatalogueView, SpeciesDetail, MapView, SocialView
 server/          Node + Express proxy layer
   src/index.js     app setup, CORS, dotenv
   src/routes/      the six API routes

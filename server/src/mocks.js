@@ -142,6 +142,15 @@ export const NEARBY_SPECIES = [
   },
 ]
 
+/**
+ * Offline names for the handful of places this app was built around.
+ *
+ * No longer the source of truth: place names come from iNaturalist via
+ * getPlaceName() in services/inaturalist.js, because a user can now log a catch
+ * anywhere and a three-entry table cannot name Maricopa County. This is what
+ * describePlace() in routes/api.js falls back to when that lookup fails, so a
+ * region label never blocks a response.
+ */
 export const PLACES = {
   10: 'Oregon',
   962: 'Lane County, OR',

@@ -10,26 +10,61 @@ export const api = axios.create({
 export const identify = (body) => api.post('/api/identify', body).then((r) => r.data)
 
 /**
- * GET /api/species/:taxonId/status — native / introduced / invasive for a place.
+ * Turn a { lat, lng } into the params every place-scoped route accepts.
+ *
+ * Coordinates and not a place id: which region a species is native to is a
+ * question about where the user is standing, and the server resolves that
+ * itself so the client cannot get it wrong (or claim a convenient region).
+ * Passing nothing is allowed — the server falls back and says that it did.
+ */
+const placeParams = (location) =>
+  location && Number.isFinite(location.lat) && Number.isFinite(location.lng)
+    ? { lat: location.lat, lng: location.lng }
+    : {}
+
+/**
+ * GET /api/species/:taxonId/status — native / introduced / invasive, where you are.
  *
  * Pl@ntNet identifications come back with `inatTaxonId: null` (it only knows
  * GBIF ids), so pass `scientificName` whenever `taxonId` is missing — the
  * server resolves it against iNaturalist before looking up status.
+ *
+ * The response carries `placeName` and `placeSource`; a `placeSource` of
+ * 'fallback' means the verdict is not about the user's own region and the UI
+ * should say so rather than presenting it as local.
  */
-export const getSpeciesStatus = (taxonId, placeId, scientificName) =>
+export const getSpeciesStatus = (taxonId, location, scientificName) =>
   api
     .get(`/api/species/${taxonId ?? 'unknown'}/status`, {
-      params: { place_id: placeId, scientific_name: taxonId ? undefined : scientificName },
+      params: {
+        ...placeParams(location),
+        scientific_name: taxonId ? undefined : scientificName,
+      },
     })
     .then((r) => r.data)
 
 /** GET /api/species/:taxonId/phenology — monthly observation histogram. Same fallback as above. */
-export const getSpeciesPhenology = (taxonId, placeId, scientificName) =>
+export const getSpeciesPhenology = (taxonId, location, scientificName) =>
   api
     .get(`/api/species/${taxonId ?? 'unknown'}/phenology`, {
-      params: { place_id: placeId, scientific_name: taxonId ? undefined : scientificName },
+      params: {
+        ...placeParams(location),
+        scientific_name: taxonId ? undefined : scientificName,
+      },
     })
     .then((r) => r.data)
+
+/**
+ * GET /api/places/resolve — coordinates -> the region whose species list applies.
+ *
+ * Only the map needs this directly: it has to name a region before there is
+ * anything to identify. The capture flow sends coordinates with the catch and
+ * lets the server resolve the place as part of classifying it.
+ *
+ * Rejects with a 404 for coordinates iNaturalist has no place for (mid-ocean).
+ */
+export const resolvePlace = ({ lat, lng }) =>
+  api.get('/api/places/resolve', { params: { lat, lng } }).then((r) => r.data)
 
 /** GET /api/region/:placeId/nearby — species recently observed near a place. */
 export const getNearby = (placeId, params) =>

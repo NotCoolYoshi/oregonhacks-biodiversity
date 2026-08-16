@@ -772,9 +772,13 @@
    colour (7.1:1).
    --------------------------------------------------------------------------- */
 
+/* auto-fit rather than a fixed count: the strip gained a fourth slab when the
+   region stopped being a constant and had to start naming itself, and four
+   across is too tight to read before the stacking breakpoint below. This
+   reflows to two-by-two on the way down instead of squeezing. */
 .stat-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: 0.6rem;
   margin: 0 0 1rem;
 }
@@ -799,6 +803,13 @@
   font-weight: 700;
   line-height: 1.1;
   color: var(--highlight);
+}
+
+/* A place name is not a numeral. At 1.5rem "Multnomah County, OR, US" wraps to
+   three lines and drags the slab taller than the three beside it. */
+.stat dd.stat-value-text {
+  font-size: 0.95rem;
+  line-height: 1.25;
 }
 
 /* Three slabs of "Threats reported" wrap to two lines each on a narrow phone.
@@ -1107,7 +1118,12 @@
   transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.species-card.is-flipped .species-card-inner {
+/* Hover and keyboard focus, not a click: the click now opens the expanded
+   view, and one tap cannot mean two things. On touch there is no hover at all,
+   which is the right outcome — a tap goes straight to the full view, where the
+   back face's three lines live now anyway. */
+.species-card:hover .species-card-inner,
+.species-card:focus-visible .species-card-inner {
   transform: rotateY(180deg);
 }
 
@@ -1147,6 +1163,18 @@
   font-size: 1.6rem;
 }
 
+/* The user's own photo, as a background rather than an <img>: it has to fill a
+   fixed box without distorting, and the name below it must stay readable at
+   any aspect ratio the camera produced. */
+.species-thumb {
+  width: 100%;
+  height: 3.4rem;
+  border-radius: calc(var(--radius) - 4px);
+  background-color: var(--color-deep-green-soft);
+  background-size: cover;
+  background-position: center;
+}
+
 .species-name {
   font-size: 0.9rem;
   font-weight: 600;
@@ -1177,7 +1205,8 @@
    tell which is showing. Cross-fade in place instead. */
 @media (prefers-reduced-motion: reduce) {
   .species-card-inner,
-  .species-card.is-flipped .species-card-inner {
+  .species-card:hover .species-card-inner,
+  .species-card:focus-visible .species-card-inner {
     transform: none;
     transition: none;
   }
@@ -1192,13 +1221,175 @@
     opacity: 0;
   }
 
-  .species-card.is-flipped .species-front {
+  .species-card:hover .species-front,
+  .species-card:focus-visible .species-front {
     opacity: 0;
   }
 
-  .species-card.is-flipped .species-back {
+  .species-card:hover .species-back,
+  .species-card:focus-visible .species-back {
     opacity: 1;
   }
+}
+
+/* Expanded species view ---------------------------------------------------- */
+
+/* A native <dialog>. showModal() brings Escape, focus handling, an inert
+   background and a real ::backdrop with it — all things a position: fixed div
+   has to reimplement, and usually gets half right. The cost is that the
+   element defaults to display: none until opened, hence the explicit display
+   on [open] rather than on the base rule. */
+.species-detail {
+  padding: 0;
+  border: 0;
+  background: none;
+  max-width: min(46rem, 100vw);
+  max-height: 100dvh;
+  color: var(--text);
+}
+
+.species-detail::backdrop {
+  background: rgba(15, 43, 29, 0.55);
+}
+
+.species-detail-body {
+  box-sizing: border-box;
+  /* The dialog itself is the click target for "close"; this catches anything
+     inside it before it gets there. */
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  max-height: 100dvh;
+  overflow-y: auto;
+}
+
+.species-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.species-detail-head h2 {
+  margin: 0;
+}
+
+.species-detail-sci {
+  margin: 0.15rem 0 0;
+  font-style: italic;
+  color: var(--text);
+}
+
+.species-detail-close {
+  flex: none;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 2.25rem;
+  height: 2.25rem;
+  font-size: 1.4rem;
+  line-height: 1;
+  background: var(--surface);
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.species-detail-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.species-detail-section {
+  margin-top: 1.5rem;
+}
+
+.species-detail-section h3 {
+  margin: 0 0 0.6rem;
+}
+
+/* Sightings ---------------------------------------------------------------- */
+
+.sighting-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+
+.sighting {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.sighting-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--color-deep-green-soft);
+}
+
+.sighting-photo.is-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  opacity: 0.5;
+}
+
+.sighting-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.sighting-place {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* Coordinates are reference data, not prose — tabular figures stop the columns
+   jittering between cards. */
+.sighting-coords {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.sighting-date {
+  color: var(--text);
+}
+
+.season-list,
+.threat-list {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.threat-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--color-threat-bg);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.threat-name {
+  font-weight: 600;
+  color: var(--text-h);
 }
 
 /* Milestones --------------------------------------------------------------- */

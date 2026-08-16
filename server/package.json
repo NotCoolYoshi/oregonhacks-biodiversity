@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
+    "setup:storage": "node scripts/setup-storage.mjs",
     "test": "node test/plantnet.test.mjs && node test/routes.test.mjs"
   },
   "dependencies": {
