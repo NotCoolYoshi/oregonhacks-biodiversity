@@ -1,9 +1,13 @@
 /* Typography and page scaffolding. Colour lives in theme.css — reference the
    semantic tokens (--text, --bg, --accent, …) from here, never raw hex. */
 :root {
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* All three fonts point at the same bubble-letter display face — 'Chewy' is
+     loaded from Google Fonts in index.html. The system-ui/monospace stacks
+     stay behind it as the fallback for the moment before the font loads (or
+     if the request fails), not as a mix of typefaces within the app. */
+  --sans: 'Chewy', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: 'Chewy', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'Chewy', ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
   letter-spacing: 0.18px;
