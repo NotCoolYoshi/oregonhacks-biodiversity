@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ICON_REFERENCE } from './iconReference'
 
 export const PIN_TIPS = [
   'Take clear photos of leaves or flowers for better ID results.',
@@ -40,7 +41,7 @@ export default function PinBanner() {
       <div className="pin-banner-inner">
         <img
           className="pin-banner-icon"
-          src="./resources/icons8-plant-48.png"
+          src={ICON_REFERENCE.plant}
           alt=""
           aria-hidden="true"
         />
