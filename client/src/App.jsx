@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import ForestBackdrop from './ForestBackdrop'
 import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
-import DexView from './views/DexView'
+import CatalogueView from './views/CatalogueView'
 import MapView from './views/MapView'
 import RegionDashboard from './views/RegionDashboard'
 
@@ -20,7 +20,7 @@ const ICONS = {
       <circle cx="12" cy="13" r="3.6" />
     </>
   ),
-  dex: (
+  catalogue: (
     <>
       <path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v15H5.5A1.5 1.5 0 0 0 4 19.5z" />
       <path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H19v-3" />
@@ -43,7 +43,7 @@ const ICONS = {
 const TABS = [
   { to: '/', icon: 'home', label: 'Home' },
   { to: '/capture', icon: 'capture', label: 'Capture' },
-  { to: '/dex', icon: 'dex', label: 'Dex' },
+  { to: '/catalogue', icon: 'catalogue', label: 'Catalogue' },
   { to: '/map', icon: 'map', label: 'Map' },
   { to: '/region', icon: 'region', label: 'Region' },
 ]
@@ -91,7 +91,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<HomeView />} />
             <Route path="/capture" element={<PhotoCapture />} />
-            <Route path="/dex" element={<DexView />} />
+            <Route path="/catalogue" element={<CatalogueView />} />
             <Route path="/map" element={<MapView />} />
             <Route path="/region" element={<RegionDashboard />} />
             <Route path="*" element={<p>Not found.</p>} />

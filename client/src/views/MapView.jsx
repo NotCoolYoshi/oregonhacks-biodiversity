@@ -17,7 +17,7 @@ const PLACE_ID = 10
  * The one place the map gets its data.
  *
  * Scoped to the place, not to the current user: the map answers "what has been
- * found here", so another user's sighting belongs on it. The dex is the
+ * found here", so another user's sighting belongs on it. The catalogue is the
  * per-user view, and it passes userId to the same endpoint.
  */
 async function loadCatches() {

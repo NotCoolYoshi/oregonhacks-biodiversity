@@ -38,7 +38,7 @@ const MAX_FILE_BYTES = 7 * 1024 * 1024
  *
  * Below this the user is asked for a better photo rather than shown a list to
  * pick from: choosing between "59%" and "12%" is a judgement they have no way
- * to make, and a wrong pick is a wrong row in the dex.
+ * to make, and a wrong pick is a wrong row in the catalogue.
  */
 const CONFIDENCE_THRESHOLD = 0.75
 
@@ -316,7 +316,7 @@ export default function PhotoCapture() {
         <p className="capture-muted">
           {phase === 'identifying'
             ? 'Matching your photo against Pl@ntNet.'
-            : 'Recording this in your dex.'}
+            : 'Recording this in your catalogue.'}
         </p>
       </section>
     )
@@ -439,7 +439,7 @@ export default function PhotoCapture() {
 
         <div className="capture-actions">
           <button type="button" onClick={submitCatch} disabled={!status && !statusError}>
-            {isThreat ? 'Report this threat' : 'Add to my dex'}
+            {isThreat ? 'Report this threat' : 'Add to my catalogue'}
           </button>
           {/* Not "back to matches" any more — the user never chose this from a
               list, so there is no previous screen to return to. */}
@@ -469,7 +469,7 @@ export default function PhotoCapture() {
             +{result.pointsAwarded} points
             {result.isFirstCatch
               ? ' — first time you have logged this species.'
-              : ' — already in your dex from elsewhere.'}
+              : ' — already in your catalogue from elsewhere.'}
           </p>
         </div>
 

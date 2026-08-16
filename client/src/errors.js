@@ -149,7 +149,7 @@ export function describeSubmitError(err) {
     case 'DUPLICATE_CATCH':
       return {
         code: data.code,
-        title: 'Already in your dex',
+        title: 'Already in your catalogue',
         guidance: detail ?? 'You have already logged this species here.',
         canRetry: false,
       }

@@ -40,7 +40,8 @@ export default function HomeView() {
           <h2>Welcome to Biodiversity</h2>
           <p className="home-description">
             Photograph a plant and find out what it is — then find out whether it 
-            belongs here. Native species go to your dex, invasive species become threat reports.
+            belongs here. Native species go to your catalogue, invasive species become threat
+            reports.
           </p>
         </section>
 
@@ -61,9 +62,9 @@ export default function HomeView() {
             <p>Identify a plant from a photo</p>
           </div>
 
-          <div className="action-card action-dex" onClick={() => navigate('/dex')}>
+          <div className="action-card action-catalogue" onClick={() => navigate('/catalogue')}>
             <div className="action-icon">📖</div>
-            <h3>Dex</h3>
+            <h3>Catalogue</h3>
             <p>View native species you found</p>
           </div>
 

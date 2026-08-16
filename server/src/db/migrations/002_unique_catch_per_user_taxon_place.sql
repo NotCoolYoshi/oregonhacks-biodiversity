@@ -17,7 +17,7 @@
 --
 -- Deliberately scoped to (user_id, taxon_id, place_id) rather than
 -- (user_id, taxon_id): finding a species in a new region is a real
--- observation and should still be recordable. It just isn't a new dex entry,
+-- observation and should still be recordable. It just isn't a new catalogue entry,
 -- which is what `isFirstCatch` reports separately.
 --
 -- Safe to re-run.
