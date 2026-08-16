@@ -178,6 +178,7 @@ let usersTable = []
 const resetTable = () => {
   table = []
   usersTable = []
+  storage = new Map()
   nextId = 1
 }
 
@@ -234,6 +235,54 @@ function handleINaturalist(url) {
 
   return json({ error: `unstubbed iNaturalist path ${url.pathname}` }, 404)
 }
+
+// ---------------------------------------------------------------------------
+// Supabase Storage
+// ---------------------------------------------------------------------------
+
+// Every object uploaded this run, keyed by path, so the tests can assert what
+// was stored rather than only what the response claimed.
+let storage = new Map()
+
+// Flipped on to exercise the route's behaviour when the bucket is missing —
+// the failure a teammate who skipped `npm run setup:storage` actually gets.
+let bucketMissing = false
+
+/**
+ * The one storage call this app makes: POST an object into a bucket.
+ *
+ * getPublicUrl() builds its URL client-side from SUPABASE_URL and never
+ * reaches the network, so it needs no stub — but that also means the URL a
+ * test sees is the real format, which is worth asserting on.
+ */
+function handleStorage(url, init) {
+  const match = url.pathname.match(/^\/storage\/v1\/object\/([^/]+)\/(.+)$/)
+  if (!match) return json({ message: `unstubbed storage path ${url.pathname}` }, 404)
+
+  const [, bucket, path] = match
+
+  if (bucketMissing) return json({ message: 'Bucket not found', error: 'Bucket not found' }, 404)
+  if (bucket !== 'catch-photos') return json({ message: 'Bucket not found' }, 404)
+
+  if ((init?.method ?? 'GET').toUpperCase() !== 'POST') {
+    return json({ message: `unstubbed storage method ${init?.method}` }, 405)
+  }
+
+  // The service uploads a Buffer, which supabase-js sends as the raw body.
+  const body = init.body
+  const bytes = body?.byteLength ?? body?.length ?? 0
+
+  if (storage.has(path)) return json({ message: 'The resource already exists' }, 409)
+  storage.set(path, { bucket, bytes })
+
+  return json({ Key: `${bucket}/${path}` }, 200)
+}
+
+/** A 1x1 JPEG, as the client would send it after compressImage(). */
+const JPEG_DATA_URL =
+  'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsL' +
+  'DBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB' +
+  '/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/9oACAEBAAA/AKrAB//Z'
 
 /** `col=eq.value` filters, applied in place — the returned rows are references. */
 function applyEqFilters(rows, url) {
@@ -366,7 +415,11 @@ globalThis.fetch = async (input, init) => {
     return realFetch(input, init)
   }
   if (url.hostname === 'api.inaturalist.org') return handleINaturalist(url)
-  if (url.hostname.endsWith('supabase.co')) return handlePostgrest(url, init)
+  if (url.hostname.endsWith('supabase.co')) {
+    return url.pathname.startsWith('/storage/')
+      ? handleStorage(url, init)
+      : handlePostgrest(url, init)
+  }
 
   throw new Error(`unstubbed host ${url.hostname}`)
 }
@@ -551,6 +604,73 @@ check('claimedType omitted when nothing was corrected', !('claimedType' in r.bod
 r = await post({ ...CATCH, taxonId: 58732 })
 check('missing type still classified from iNaturalist',
   r.body.type === 'threat_report' && r.body.typeCorrected === false, r.body.type)
+
+// ---------------------------------------------------------------------------
+// Catch photos
+// ---------------------------------------------------------------------------
+
+console.log('\n-- catch photos are uploaded, not trusted --')
+resetTable()
+
+r = await post({ ...CATCH, taxonId: 126887, photoBase64: JPEG_DATA_URL })
+check('a catch with a photo is stored', r.status === 201, r.status)
+check('exactly one object was uploaded', storage.size === 1, storage.size)
+
+const [storedPath, storedObject] = [...storage.entries()][0]
+check('...into the catch-photos bucket', storedObject.bucket === 'catch-photos',
+  storedObject.bucket)
+check('...foldered under the user', storedPath.startsWith('usr_1/'), storedPath)
+// A guessable name in a public bucket lets anyone walk other users' photos.
+check('...under a uuid, not anything derived from the catch',
+  /^usr_1\/[0-9a-f-]{36}\.jpg$/.test(storedPath), storedPath)
+check('...with the decoded bytes, not the base64 text',
+  storedObject.bytes > 0 && storedObject.bytes < JPEG_DATA_URL.length, storedObject.bytes)
+
+check('the response carries a photo URL', typeof r.body.photoUrl === 'string', r.body.photoUrl)
+check('...pointing into the public bucket',
+  r.body.photoUrl.includes(`/storage/v1/object/public/catch-photos/${storedPath}`),
+  r.body.photoUrl)
+check('...and the row stores it', table[0].photo_url === r.body.photoUrl, table[0].photo_url)
+
+// The client has no bucket credential, so a photoUrl in the body is a claim
+// about someone else's storage. The upload path is the only one that writes it.
+r = await post({ ...CATCH, taxonId: 48472, photoBase64: JPEG_DATA_URL, photoUrl: 'https://evil.example/x.jpg' })
+check('an uploaded photo overrides a client-supplied photoUrl',
+  !r.body.photoUrl.includes('evil.example'), r.body.photoUrl)
+
+r = await post({ ...CATCH, taxonId: 58732 })
+check('a catch with no photo still records', r.status === 201, r.status)
+check('...with a null photo_url', r.body.photoUrl === null, r.body.photoUrl)
+check('...and uploads nothing', storage.size === 2, storage.size)
+
+console.log('\n-- catch photos, rejected payloads --')
+resetTable()
+
+r = await post({ ...CATCH, taxonId: 126887, photoBase64: 'not-a-data-url' })
+check('a non-data-URL photo -> 400', r.status === 400, r.status)
+check('...coded BAD_REQUEST', r.body.code === 'BAD_REQUEST', r.body.code)
+check('...and writes no row', table.length === 0, table.length)
+check('...and stores nothing', storage.size === 0, storage.size)
+
+// The bucket's own mime allowlist would reject this; catching it first buys a
+// message that says which format is expected.
+r = await post({ ...CATCH, taxonId: 126887, photoBase64: 'data:image/png;base64,iVBORw0KGgo=' })
+check('a non-JPEG photo -> 400', r.status === 400, r.status)
+check('...naming the format', /JPEG/i.test(r.body.error), r.body.error)
+
+console.log('\n-- catch photos, storage unavailable --')
+resetTable()
+bucketMissing = true
+r = await post({ ...CATCH, taxonId: 126887, photoBase64: JPEG_DATA_URL })
+bucketMissing = false
+
+check('a missing bucket -> 500', r.status === 500, r.status)
+check('...coded BUCKET_MISSING', r.body.code === 'BUCKET_MISSING', r.body.code)
+check('...naming the setup command', /setup:storage/.test(r.body.error), r.body.error)
+// The row is written after the upload precisely so this cannot happen: a row
+// pointing at an object that was never stored.
+check('...and writes no row rather than one with a broken photo',
+  table.length === 0, table.length)
 
 console.log('\n-- isFirstCatch --')
 resetTable()
@@ -820,11 +940,14 @@ console.log('\n-- list catches, row shape --')
 l = await listCatches('?userId=usr_1&placeId=10')
 const row = l.body.catches[0]
 for (const field of ['id', 'taxon_id', 'scientific_name', 'common_name', 'type', 'lat', 'lng',
-  'created_at']) {
+  'place_id', 'place_name', 'photo_url', 'created_at']) {
   check(`row carries ${field}`, field in row, JSON.stringify(row))
 }
+// user_id is the one column here that identifies a person. photo_url used to
+// be withheld alongside it, but for a different reason — it was always null.
+// Now that catches carry photos the catalogue needs it, and the bucket is
+// public-read, so the URL grants nothing the object does not already.
 check('row does not leak user_id', !('user_id' in row), JSON.stringify(row))
-check('row does not leak photo_url', !('photo_url' in row))
 
 // The map filters these out client-side; the endpoint must not do it for it,
 // or the catalogue silently loses every catch logged without geolocation.

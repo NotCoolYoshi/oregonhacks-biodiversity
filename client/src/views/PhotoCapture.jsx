@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { identify, getSpeciesStatus, createCatch } from '../api'
 import { getUserId } from '../session'
+import { compressImage } from '../image'
 import { describeIdentifyError, describeSubmitError, describeRetriesExhausted } from '../errors'
 
 /**
@@ -24,10 +25,15 @@ const ORGANS = [
   { value: 'bark', label: 'Bark' },
 ]
 
-// The server caps JSON bodies at 10mb and base64 inflates by about a third,
-// so anything past ~7mb fails as a body-size error with no useful code on it.
-// Catching it here buys a message that names the actual problem.
-const MAX_FILE_BYTES = 7 * 1024 * 1024
+/**
+ * Ceiling on the file the user picks, before compression.
+ *
+ * Compression makes the old 7mb limit (the server's 10mb JSON body, less what
+ * base64 adds) unreachable — a 1600px JPEG is a few hundred KB whatever went
+ * in. This is now a guard on decoding rather than on uploading: a 100-megapixel
+ * image can exhaust memory on a phone before the canvas ever sees it.
+ */
+const MAX_FILE_BYTES = 25 * 1024 * 1024
 
 /**
  * Top-match score at or above which the app commits to a species by itself.
@@ -122,8 +128,9 @@ export default function PhotoCapture() {
   const [phase, setPhase] = useState('idle')
 
   const [organ, setOrgan] = useState('')
-  const [photo, setPhoto] = useState(null) // { dataUrl, name }
+  const [photo, setPhoto] = useState(null) // { dataUrl, name, width, height, bytes }
   const [fileError, setFileError] = useState(null)
+  const [compressing, setCompressing] = useState(false)
 
   const [identifySource, setIdentifySource] = useState(null)
 
@@ -132,9 +139,11 @@ export default function PhotoCapture() {
   // and takes them with it, which is exactly the intended lifetime.
   const [attempts, setAttempts] = useState(0)
   const [bestCandidate, setBestCandidate] = useState(null)
+  const [bestPhoto, setBestPhoto] = useState(null)
   const [retryTip, setRetryTip] = useState(null)
 
   const [selected, setSelected] = useState(null)
+  const [capturedPhoto, setCapturedPhoto] = useState(null)
   const [status, setStatus] = useState(null)
   const [statusError, setStatusError] = useState(null)
 
@@ -195,8 +204,10 @@ export default function PhotoCapture() {
       clearPhoto()
       setAttempts(0)
       setBestCandidate(null)
+      setBestPhoto(null)
       setRetryTip(null)
       setSelected(null)
+      setCapturedPhoto(null)
       setStatus(null)
       setStatusError(null)
       setResult(null)
@@ -205,7 +216,15 @@ export default function PhotoCapture() {
     [clearPhoto],
   )
 
-  function onPickFile(event) {
+  /**
+   * Take the picked file down to something worth sending, once.
+   *
+   * The compressed copy is what everything downstream uses — identification and
+   * storage both. Compressing per destination would mean doing it twice and
+   * keeping the original in memory in between, for a photo already well above
+   * what either needs at 1600px.
+   */
+  async function onPickFile(event) {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -213,28 +232,36 @@ export default function PhotoCapture() {
 
     if (file.size > MAX_FILE_BYTES) {
       const mb = (file.size / 1024 / 1024).toFixed(1)
-      setFileError(`That photo is ${mb}MB. The server accepts about 7MB — try a smaller one.`)
+      setFileError(`That photo is ${mb}MB, which is too large to process. Try a smaller one.`)
       setPhoto(null)
       return
     }
 
-    const reader = new FileReader()
-    reader.onerror = () => setFileError('Could not read that file.')
-    // readAsDataURL gives `data:image/jpeg;base64,...`. The server strips the
-    // prefix and uses the declared type; a bare base64 string would be assumed
-    // to be JPEG, which would mislabel a PNG or HEIC.
-    reader.onload = () => setPhoto({ dataUrl: String(reader.result), name: file.name })
-    reader.readAsDataURL(file)
+    setCompressing(true)
+    try {
+      // dataUrl is `data:image/jpeg;base64,...`. The prefix carries the content
+      // type, which both the identify route and the storage upload read — a
+      // bare base64 string would be assumed to be JPEG, and after this it
+      // always is, but the server should not have to take that on trust.
+      const { dataUrl, width, height, bytes } = await compressImage(file)
+      setPhoto({ dataUrl, name: file.name, width, height, bytes })
+    } catch (err) {
+      setFileError(err.message ?? 'Could not read that file.')
+      setPhoto(null)
+    } finally {
+      setCompressing(false)
+    }
   }
 
   /**
    * An attempt that did not clear the bar: ask for another photo, or stop.
    *
-   * `attempt` and `best` are passed in rather than read from state — both are
-   * set in the same tick as this runs, and a stale read here would either lose
-   * an attempt off the count or discard the result we are about to settle for.
+   * `attempt`, `best` and `bestFrom` are passed in rather than read from state
+   * — all three are set in the same tick as this runs, and a stale read here
+   * would either lose an attempt off the count or discard the result we are
+   * about to settle for.
    */
-  function handleWeakAttempt(attempt, best) {
+  function handleWeakAttempt(attempt, best, bestFrom) {
     if (attempt < MAX_ATTEMPTS) {
       setRetryTip(RETRY_TIPS[(attempt - 1) % RETRY_TIPS.length])
       setPhase('retry')
@@ -244,7 +271,7 @@ export default function PhotoCapture() {
     // Out of attempts. Settle for the strongest match seen across the whole
     // session, which is not necessarily the one from the last photo.
     if (best) {
-      pickCandidate(best)
+      pickCandidate(best, bestFrom)
       return
     }
 
@@ -270,27 +297,34 @@ export default function PhotoCapture() {
       // An empty list is the same outcome as a rejected one, and the server
       // only returns it for mock data — a real Pl@ntNet miss throws NO_MATCH.
       if (results.length === 0) {
-        handleWeakAttempt(attempt, bestCandidate)
+        handleWeakAttempt(attempt, bestCandidate, bestPhoto)
         return
       }
 
       const top = results[0]
-      const best = scoreOf(top) > scoreOf(bestCandidate) ? top : bestCandidate
+      // Which photo produced the running best, tracked in lockstep with the
+      // candidate itself. Without it a session that settles for attempt 2's
+      // match would file it under attempt 5's photo, and the catalogue would
+      // show a picture of a plant that is not the one it names.
+      const improved = scoreOf(top) > scoreOf(bestCandidate)
+      const best = improved ? top : bestCandidate
+      const bestFrom = improved ? photo : bestPhoto
       setBestCandidate(best)
+      setBestPhoto(bestFrom)
 
       if (scoreOf(top) >= CONFIDENCE_THRESHOLD) {
-        pickCandidate(top)
+        pickCandidate(top, photo)
         return
       }
 
-      handleWeakAttempt(attempt, best)
+      handleWeakAttempt(attempt, best, bestFrom)
     } catch (err) {
       const described = describeIdentifyError(err, organ)
 
       // LOW_CONFIDENCE and NO_MATCH carry no results with them, so they cost an
       // attempt without ever improving `bestCandidate`.
       if (RETRYABLE_CODES.has(described.code)) {
-        handleWeakAttempt(attempt, bestCandidate)
+        handleWeakAttempt(attempt, bestCandidate, bestPhoto)
         return
       }
 
@@ -299,8 +333,12 @@ export default function PhotoCapture() {
     }
   }
 
-  async function pickCandidate(candidate) {
+  async function pickCandidate(candidate, sourcePhoto) {
     setSelected(candidate)
+    // The photo this identification actually came from, which is what gets
+    // stored with the catch. Held separately from `photo` because that one is
+    // cleared on the way back to the idle screen between retries.
+    setCapturedPhoto(sourcePhoto ?? null)
     setStatus(null)
     setStatusError(null)
     setPhase('status-preview')
@@ -344,7 +382,10 @@ export default function PhotoCapture() {
           // No placeId: the server derives the place from these coordinates,
           // which is what keeps the verdict about where the photo was taken.
           ...(location ? { location } : {}),
-          // No photoUrl — there is no image storage in this app yet.
+          // The compressed photo this identification came from. The server
+          // uploads it to storage and puts the resulting URL on the row — the
+          // client never touches the bucket, and photoUrl is not ours to name.
+          ...(capturedPhoto ? { photoBase64: capturedPhoto.dataUrl } : {}),
         }),
       )
       setPhase('result')
@@ -591,10 +632,11 @@ export default function PhotoCapture() {
       </label>
 
       {fileError && <p className="capture-note">{fileError}</p>}
+      {compressing && <p className="capture-muted">Preparing your photo…</p>}
       {photo && <img className="capture-preview" src={photo.dataUrl} alt="Selected plant" />}
 
       <div className="capture-actions">
-        <button type="button" onClick={runIdentify} disabled={!photo || !organ}>
+        <button type="button" onClick={runIdentify} disabled={!photo || !organ || compressing}>
           Identify this plant
         </button>
       </div>

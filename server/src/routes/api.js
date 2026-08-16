@@ -14,6 +14,7 @@ import {
   INaturalistError,
 } from '../services/inaturalist.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
+import { uploadCatchPhoto, PhotoStorageError } from '../services/photoStorage.js'
 
 const router = Router()
 
@@ -306,7 +307,7 @@ function requireDatabase(res) {
  * error handler, which logs it and says "Internal server error".
  */
 function handleRouteError(err, routeLabel, res, next) {
-  if (err instanceof INaturalistError || err.isDatabaseError) {
+  if (err instanceof INaturalistError || err.isDatabaseError || err.isPhotoStorageError) {
     if (err.retryAfter) res.set('Retry-After', err.retryAfter)
     console.warn(`[${routeLabel}] ${err.code}: ${err.message}`)
     return res.status(err.status).json({ error: err.message, code: err.code })
@@ -544,6 +545,18 @@ router.post('/catches', async (req, res, next) => {
 
     const isFirstCatch = (existing?.length ?? 0) === 0
 
+    // Store the photo before the row, so a row never points at an object that
+    // failed to upload. The other order is worse: a broken image in the
+    // catalogue is invisible until someone opens the card, while a failed
+    // upload here is reported immediately and costs the user one retry.
+    //
+    // Deliberately after the duplicate check — no point spending an upload on
+    // a catch that is about to be refused.
+    let photoUrl = body.photoUrl ?? null
+    if (body.photoBase64) {
+      photoUrl = await uploadCatchPhoto(body.photoBase64, userId)
+    }
+
     const { data: row, error: insertError } = await sb
       .from('catches')
       .insert({
@@ -558,7 +571,7 @@ router.post('/catches', async (req, res, next) => {
         place_name: place.placeName,
         lat: Number.isFinite(Number(location.lat)) ? Number(location.lat) : null,
         lng: Number.isFinite(Number(location.lng)) ? Number(location.lng) : null,
-        photo_url: body.photoUrl ?? null,
+        photo_url: photoUrl,
         confidence: Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null,
       })
       .select()
@@ -645,7 +658,15 @@ router.get('/catches', async (req, res, next) => {
 
     let query = sb
       .from('catches')
-      .select('id, taxon_id, scientific_name, common_name, type, lat, lng, created_at')
+      // photo_url is included now that catches actually carry one. It was
+      // withheld while it was always null, and it is safe to serve: the bucket
+      // is public-read, so the URL grants nothing the object does not already.
+      // user_id stays out — that is the one column here that identifies a
+      // person, and no caller needs it back.
+      .select(
+        'id, taxon_id, scientific_name, common_name, type, lat, lng, ' +
+          'place_id, place_name, photo_url, created_at',
+      )
 
     if (userId) query = query.eq('user_id', userId)
     if (hasPlaceId) query = query.eq('place_id', placeId)

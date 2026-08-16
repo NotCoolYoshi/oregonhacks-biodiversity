@@ -158,6 +158,16 @@ What actually exists:
   confidence, created_at. Unique on (user_id, taxon_id, place_id), so the same
   bush cannot be farmed for points.
 
+  `photo_url` needed no migration — it has been in `schema.sql` since the
+  beginning, written as null. One photo per catch row, and since the catalogue
+  already groups catches into one card per species, a species card carries one
+  photo per sighting without a second table.
+
+  That unique index is worth reading together with the expanded species card:
+  a user gets **one catch per species per place**, so the photo grid on a card
+  holds one photo per place they have found that species, not one per
+  encounter.
+
 Not built:
 
 - `users` — there is no auth. The browser generates an id and keeps it in
@@ -185,11 +195,37 @@ route re-reads establishment means for the distinct taxa it found — one bulk,
 cached call — rather than counting every catch as native. Persisting
 establishment means on the row would remove that hop; it is not stored today.
 
+### 4. Supabase Storage — catch photos
+
+Bucket **`catch-photos`**, created by `server/scripts/setup-storage.mjs` (the
+one piece of infrastructure the repo provisions for itself; the SQL is still
+applied by hand). Public read, `image/jpeg` only, 5 MB ceiling.
+
+Uploads go through the server, not the browser: the client holds no Supabase
+credential, and the alternative — the anon key plus an insert policy — would
+let anyone with devtools write to the bucket. The photo already passes through
+`POST /api/catches`, so uploading it there costs nothing extra.
+
+Objects are `<user_id>/<uuid>.jpg`. The uuid matters: in a public bucket a name
+derived from the catch would let anyone enumerate other people's photos.
+
+The upload happens **before** the row insert, so a `catches` row never points at
+an object that failed to store. A failed upload costs the user a retry; the
+other order costs them a permanently broken image they will not discover until
+they open the card.
+
+The browser compresses first (`client/src/image.js`): 1600px on the long edge,
+JPEG at 80%, canvas only. A 12-megapixel phone photo goes from ~1.5 MB to
+~300 KB, which is paid twice over — once on the user's upload, once in storage.
+It also honours EXIF orientation, without which every portrait photo would be
+stored sideways and permanently, since re-encoding drops the EXIF that would
+have corrected it on display.
+
 ## Open questions
 
-- **Where does the photo live?** Right now `POST /api/identify` takes base64 in
-  the request body (10mb cap). Fine for the demo; object storage is the real
-  answer.
+- ~~**Where does the photo live?**~~ Answered: the `catch-photos` bucket above.
+  `POST /api/identify` still takes base64 in the body, but it is now a
+  compressed few hundred KB rather than a raw camera file.
 - ~~**How is a region chosen?**~~ Answered: from the user's coordinates, via
   `/v1/places/nearby`. It turned out not to be another dependency — it is the
   same iNaturalist API the status lookup already uses.
