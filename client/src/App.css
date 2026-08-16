@@ -445,3 +445,57 @@
 .profile-text .skeleton.owned {
   width: 100px;
 }
+
+/* ---------------------------------------------------------------------------
+   Map markers
+
+   Green circle = catch, orange diamond = threat report. Shape carries the
+   distinction as well as colour, so the two stay tellable apart when the map
+   tiles are busy or the viewer cannot separate the hues.
+   --------------------------------------------------------------------------- */
+
+/* Never put `transform` on .map-pin itself — Leaflet owns that property for
+   marker positioning. The shape lives on the inner span. */
+.map-pin-shape,
+.map-swatch {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.map-pin-catch .map-pin-shape,
+.map-swatch-catch {
+  background: rgb(34, 160, 90);
+  border-radius: 50%;
+}
+
+.map-pin-threat .map-pin-shape,
+.map-swatch-threat {
+  background: rgb(214, 120, 20);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.map-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.map-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: none;
+}
+
+.map-popup-catch {
+  color: rgb(24, 120, 66);
+}
+
+.map-popup-threat {
+  color: rgb(170, 92, 12);
+}
