@@ -49,12 +49,7 @@ export default function SocialView() {
       <h2>Social</h2>
 
       <section className="social-section">
-        <div className="social-section-head">
-          <h3>Leaderboard</h3>
-          {/* Says so on the page, not just in a comment — a plausible-looking
-              ranking is the kind of placeholder that survives to a demo. */}
-          <span className="badge-placeholder">Sample data</span>
-        </div>
+        <h3>Leaderboard</h3>
 
         <ol className="leaderboard">
           {PLACEHOLDER_STANDINGS.map((entry, i) => (

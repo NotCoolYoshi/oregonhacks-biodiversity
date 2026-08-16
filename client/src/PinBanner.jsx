@@ -1,47 +1,60 @@
 import { useEffect, useState } from 'react'
+import { ICON_REFERENCE } from './iconReference'
 
-// Small set of tips shown in the pinned message. Pick one at random on mount.
-const TIPS = [
-  'Take clear photos of leaves or flowers for better ID results!',
-  'Hold the camera steady and include a close-up of the leaf or flower.',
-  'Try to include multiple angles: leaf, stem, and whole plant for best matches.',
-  'If outdoors, get a photo with good light and avoid heavy shadows on the plant.',
+export const PIN_TIPS = [
+  'Take clear photos of leaves or flowers for better ID results.',
+  'Try photographing the whole plant, not just a single leaf, to improve matches.',
+  'Look for native plants nearby and compare them to your catalogue before reporting threats.',
+  'A bright, in-focus shot often beats a close-up with poor lighting.',
+  'Fresh field notes help when you want to revisit a species later in your catalogue.',
 ]
 
+const DISMISSED_KEY = 'oregonhacks.pinBannerDismissed'
+
 export default function PinBanner() {
-  const [tip, setTip] = useState('')
-  const [visible, setVisible] = useState(true)
+  const [isVisible, setIsVisible] = useState(() => {
+    try {
+      return sessionStorage.getItem(DISMISSED_KEY) !== '1'
+    } catch {
+      return true
+    }
+  })
+  const [tip, setTip] = useState(() => {
+    const index = Math.floor(Math.random() * PIN_TIPS.length)
+    return PIN_TIPS[index]
+  })
 
   useEffect(() => {
-    // If the user dismissed the banner earlier during this session, keep it hidden.
-    const dismissed = sessionStorage.getItem('pinBannerDismissed') === '1'
-    if (dismissed) {
-      setVisible(false)
-      return
+    if (!isVisible) {
+      try {
+        sessionStorage.setItem(DISMISSED_KEY, '1')
+      } catch {
+        // Storage can fail in private browsing; the component still dismisses in memory.
+      }
     }
+  }, [isVisible])
 
-    // Choose a random tip on mount
-    const idx = Math.floor(Math.random() * TIPS.length)
-    setTip(TIPS[idx])
-  }, [])
+  if (!isVisible) return null
 
-  const close = () => {
-    setVisible(false)
-    sessionStorage.setItem('pinBannerDismissed', '1')
-  }
-
-  if (!visible) return null
-
-
-  //waiting for image to added to the banner
   return (
-    <div className="pin-banner" role="region" aria-label="Tip banner">
-
-      <div className="pin-leaf">🌿</div>
-      <div className="pin-text">{tip}</div>
-      <button className="pin-close" aria-label="Dismiss tip" onClick={close}>
-        ✕
-      </button>
+    <div className="pin-banner" role="status" aria-live="polite">
+      <div className="pin-banner-inner">
+        <img
+          className="pin-banner-icon"
+          src={ICON_REFERENCE.plant}
+          alt=""
+          aria-hidden="true"
+        />
+        <p>{tip}</p>
+        <button
+          type="button"
+          className="pin-banner-close"
+          aria-label="Close tip banner"
+          onClick={() => setIsVisible(false)}
+        >
+          ×
+        </button>
+      </div>
     </div>
   )
 }

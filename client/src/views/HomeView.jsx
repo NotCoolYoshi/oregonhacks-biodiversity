@@ -29,21 +29,15 @@ export default function HomeView() {
         <UserProfile />
       </div>
 
-      <div className="home-tip">
-        <span className="tip-icon">🌿</span>
-        <p>Tips: Take clear photos of leaves or flowers for better ID results!</p>
-        <button className="tip-close" aria-label="Close">×</button>
-      </div>
-
       <div className="home-content">
-        <section className="home-section">
+        {/* <section className="home-section">
           <h2>Welcome to Biodiversity</h2>
           <p className="home-description">
             Photograph a plant and find out what it is — then find out whether it 
             belongs here. Native species go to your catalogue, invasive species become threat
             reports.
           </p>
-        </section>
+        </section> */}
 
         {!loading && score && (
           <section className="home-section">
@@ -58,7 +52,7 @@ export default function HomeView() {
           </section>
         )}
 
-        <section className="home-actions">
+        {/* <section className="home-actions">
           <div className="action-card action-capture" onClick={() => navigate('/capture')}>
             <div className="action-icon">📸</div>
             <h3>Capture</h3>
@@ -82,7 +76,7 @@ export default function HomeView() {
             <h3>Social</h3>
             <p>Leaderboard, friends and quests</p>
           </div>
-        </section>
+        </section> */}
       </div>
     </div>
   )
