@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { useNavigate } from 'react-router-dom'
 import L from 'leaflet'
@@ -6,6 +6,9 @@ import 'leaflet/dist/leaflet.css'
 
 import { getCatches, getRegionScore, resolvePlace, getNearbyObservations } from '../api'
 import { getUserId } from '../session'
+import { taxonToIconCategory } from '../taxonCategory'
+import { categoryIcon, legendSvg, LEGEND_CATEGORIES } from '../markerIcons'
+import { addRegionShading } from '../regionShading'
 
 // Where the map opens when it has nothing better: the whole world, which is
 // honest about knowing nothing. It used to be the middle of Oregon, which was
@@ -82,6 +85,12 @@ function chooseView({ position, catches }) {
 // Leaflet positions markers by writing `transform: translate3d(...)` onto that
 // div, so any `transform` in our own CSS would replace it and pile every marker
 // onto the pane's top-left corner.
+//
+// Catches and threat reports no longer come through here — they carry a species
+// glyph now and are drawn as SVG in markerIcons.js. This is the nearby-unknown
+// treatment only, which stays a plain CSS shape on purpose: those pins say
+// "something is here that you have not caught", and giving them a glyph would
+// dress up an identification the layer does not claim to have.
 const pinIcon = (variant) =>
   L.divIcon({
     className: `map-pin map-pin-${variant}`,
@@ -92,8 +101,6 @@ const pinIcon = (variant) =>
   })
 
 const ICONS = {
-  catch: pinIcon('catch'),
-  threat_report: pinIcon('threat'),
   // Two greys, not one. An observation identified to species is something you
   // can go and find; one identified only to genus or family is a lead. Both
   // read as "not yours yet" against the solid catch and threat pins.
@@ -185,7 +192,14 @@ function RegionStrip({ at }) {
 
 function CatchMarkers({ catches }) {
   return catches.map((c) => (
-    <Marker key={c.id} position={[c.lat, c.lng]} icon={ICONS[c.type] ?? ICONS.catch}>
+    <Marker
+      key={c.id}
+      position={[c.lat, c.lng]}
+      // Bucketed from the scientific_name already on the row — no lookup, and
+      // so no per-marker request. See taxonCategory.js for why the genus is the
+      // only taxonomy a catch row carries.
+      icon={categoryIcon(c.type, taxonToIconCategory(c))}
+    >
       <Popup>
         <strong>{c.common_name ?? 'Unknown species'}</strong>
         <br />
@@ -195,6 +209,48 @@ function CatchMarkers({ catches }) {
       </Popup>
     </Marker>
   ))
+}
+
+/**
+ * Density shading under the pins, built from the catches already on screen.
+ *
+ * Takes no data of its own — `points` are the same rows CatchMarkers draws, so
+ * switching this on costs nothing but a canvas. Lives inside <MapContainer>
+ * because L.heatLayer needs the map instance.
+ *
+ * Additive and never load-bearing, on the same terms as the nearby-plants
+ * layer: the plugin is fetched on demand, and if that fetch fails the layer
+ * stays empty and the map carries on. Renders nothing itself — the heat canvas
+ * is a Leaflet layer, not a React child.
+ */
+function RegionShadingLayer({ enabled, points }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!enabled || points.length === 0) return undefined
+
+    let removeLayer = null
+    let cancelled = false
+
+    addRegionShading(map, points)
+      .then((remove) => {
+        // Switched off, or unmounted, while the plugin chunk was in flight.
+        if (cancelled) return remove()
+        removeLayer = remove
+      })
+      .catch((err) => {
+        // Deliberately swallowed, like the nearby layer's failures: this is a
+        // reading of the map, not the map.
+        console.warn('[map] region shading unavailable:', err?.message ?? err)
+      })
+
+    return () => {
+      cancelled = true
+      removeLayer?.()
+    }
+  }, [enabled, points, map])
+
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -402,19 +458,136 @@ function NearbyUnknownLayer({ enabled, onStatus, onPick }) {
 }
 
 /**
- * The layer switch.
+ * Every layer the map can draw, in the order the panel lists them.
  *
- * Catches are not toggleable — they are the map's subject, and a map of nothing
- * is not a state worth offering. Only the additive layer gets a switch.
+ * Reading order is what the map is *about*, then what it infers, then what it
+ * borrows: the two kinds of record first, the density read off them next, and
+ * the iNaturalist layer — the only one that is not this app's own data — last.
  */
-function LayerToggle({ showUnknown, onToggle, caption }) {
+const LAYERS = [
+  { id: 'catches', label: 'Catches' },
+  { id: 'threats', label: 'Threat reports' },
+  { id: 'shading', label: 'Region shading' },
+  { id: 'unknown', label: 'Nearby unknown plants' },
+]
+
+/**
+ * What the map shows when it opens.
+ *
+ * Both kinds of record on, both extra layers off — which is exactly what the
+ * map did before it had a panel, when catches and threats were unconditional
+ * and the only switch was the nearby-unknown one that defaulted off. Named as a
+ * constant so that "the defaults did not change" is a thing you can read rather
+ * than reconstruct from four useState calls.
+ */
+const DEFAULT_LAYERS = {
+  catches: true,
+  threats: true,
+  shading: false,
+  unknown: false,
+}
+
+/**
+ * The layer panel.
+ *
+ * One control per layer, in one place, rather than the map's subject being
+ * unswitchable and only the additive layer getting a switch. Catches are still
+ * the reason the page exists — they are just no longer the only thing on it,
+ * and a map with four layers on it needs somewhere to say which four.
+ *
+ * A layer captions itself underneath its own checkbox. The caption used to
+ * trail the whole panel, which was unambiguous when there was one switch and
+ * would not be with four.
+ */
+function LayerPanel({ shown, captions, onToggle }) {
   return (
-    <div className="map-layers">
-      <label className="map-layer-toggle">
-        <input type="checkbox" checked={showUnknown} onChange={(e) => onToggle(e.target.checked)} />
-        <span>Nearby unknown plants</span>
-      </label>
-      {caption && <span className="capture-muted map-layer-caption">{caption}</span>}
+    <div className="map-layers" role="group" aria-label="Map layers">
+      {LAYERS.map(({ id, label }) => (
+        <div className="map-layer" key={id}>
+          <label className="map-layer-toggle">
+            <input
+              type="checkbox"
+              checked={shown[id]}
+              onChange={(event) => onToggle(id, event.target.checked)}
+            />
+            <span>{label}</span>
+          </label>
+          {captions[id] && <span className="capture-muted map-layer-caption">{captions[id]}</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * A legend entry drawn with the same markup as the marker it explains.
+ *
+ * `dangerouslySetInnerHTML` because the SVG is a string — it has to be, since
+ * Leaflet takes marker artwork as HTML. The string is a template literal built
+ * from module constants in markerIcons.js with nothing user-supplied anywhere
+ * in it, so there is no injection surface here; the alternative is a second,
+ * JSX copy of every glyph that would drift from the first.
+ */
+function LegendMark({ type, category }) {
+  return (
+    <span
+      className="map-legend-mark"
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: legendSvg(type, category) }}
+    />
+  )
+}
+
+/**
+ * Two readings of the same markers, because they carry two independent facts.
+ *
+ * The frame says whether a record is a catch or a threat report; the glyph says
+ * what kind of plant it is. Listing all twelve combinations would be a wall —
+ * so the first row explains the frames, using the unknown glyph so nothing in
+ * it suggests a category, and the second explains the glyphs on the catch
+ * frame, since that is the one most pins wear.
+ */
+function MapLegend({ shown }) {
+  // Only the glyph-bearing layers need the category row explained, so it goes
+  // when both are off — as does the legend entirely, if nothing is on. A legend
+  // for an empty map is a list of things that are not there.
+  const showCategories = shown.catches || shown.threats
+  const anything = showCategories || shown.shading || shown.unknown
+  if (!anything) return null
+
+  return (
+    <div className="capture-muted map-legend">
+      <p className="map-legend-row">
+        {shown.catches && (
+          <span className="map-legend-item">
+            <LegendMark type="catch" category="unknown" /> Catch
+          </span>
+        )}
+        {shown.threats && (
+          <span className="map-legend-item">
+            <LegendMark type="threat_report" category="unknown" /> Threat report
+          </span>
+        )}
+        {shown.unknown && (
+          <span className="map-legend-item">
+            <span className="map-swatch map-swatch-unknown" aria-hidden="true" /> Not caught yet
+          </span>
+        )}
+        {shown.shading && (
+          <span className="map-legend-item">
+            <span className="map-shading-ramp" aria-hidden="true" /> Fewer → more records
+          </span>
+        )}
+      </p>
+      {showCategories && (
+        <p className="map-legend-row">
+          {LEGEND_CATEGORIES.map(({ category, label }) => (
+            <span className="map-legend-item" key={category}>
+              <LegendMark type="catch" category={category} /> {label}
+            </span>
+          ))}
+        </p>
+      )}
     </div>
   )
 }
@@ -449,7 +622,7 @@ function captionFor(showUnknown, status) {
 
 export default function MapView() {
   const navigate = useNavigate()
-  const [showUnknown, setShowUnknown] = useState(false)
+  const [layers, setLayers] = useState(DEFAULT_LAYERS)
   const [unknownStatus, setUnknownStatus] = useState(null)
   const [catches, setCatches] = useState([])
   const [loading, setLoading] = useState(true)
@@ -491,8 +664,41 @@ export default function MapView() {
     }
   }, [])
 
-  const plottable = catches.filter(isPlottable)
+  // Memoised because the shading layer takes these by identity: an array
+  // rebuilt on every render would tear the heat canvas down and put it back up
+  // on every render too.
+  const plottable = useMemo(() => catches.filter(isPlottable), [catches])
   const unplottable = catches.length - plottable.length
+
+  // Every record weighs the same. This is a count of what has been found, and a
+  // threat report is as much a record of someone having looked as a catch is —
+  // weighting them apart would make the shading say something about health that
+  // a density field cannot support.
+  //
+  // Built from every plottable row, not from the visible ones: the switches are
+  // independent, so hiding the threat pins must not silently redraw the
+  // shading underneath them into a different answer.
+  const heatPoints = useMemo(() => plottable.map((c) => [c.lat, c.lng, 1]), [plottable])
+
+  // Threat reports and catches are the same rows with different `type` values,
+  // so one filter serves both switches. An unrecognised type counts as a catch,
+  // matching how the icons fall back — a row with a type nobody expected should
+  // still be visible by default rather than hidden by both switches at once.
+  const visibleMarkers = useMemo(
+    () =>
+      plottable.filter((c) =>
+        c.type === 'threat_report' ? layers.threats : layers.catches,
+      ),
+    [plottable, layers.catches, layers.threats],
+  )
+
+  const toggleLayer = useCallback((id, next) => {
+    setLayers((current) => ({ ...current, [id]: next }))
+    // Switching the layer off throws away what it last reported. Leaving the
+    // status behind would let a stale caption reappear the moment it is
+    // switched back on, before the first request has answered.
+    if (id === 'unknown' && !next) setUnknownStatus(null)
+  }, [])
 
   return (
     <section>
@@ -500,13 +706,10 @@ export default function MapView() {
 
       <RegionStrip at={view?.at ?? null} />
 
-      <LayerToggle
-        showUnknown={showUnknown}
-        onToggle={(next) => {
-          setShowUnknown(next)
-          if (!next) setUnknownStatus(null)
-        }}
-        caption={captionFor(showUnknown, unknownStatus)}
+      <LayerPanel
+        shown={layers}
+        captions={{ unknown: captionFor(layers.unknown, unknownStatus) }}
+        onToggle={toggleLayer}
       />
 
       {loading && <p className="capture-muted">Loading catches…</p>}
@@ -551,9 +754,12 @@ export default function MapView() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <CatchMarkers catches={plottable} />
+          {/* Before the markers, so the canvas lands in the overlay pane and
+              the pins keep the marker pane above it. */}
+          <RegionShadingLayer enabled={layers.shading} points={heatPoints} />
+          <CatchMarkers catches={visibleMarkers} />
           <NearbyUnknownLayer
-            enabled={showUnknown}
+            enabled={layers.unknown}
             onStatus={setUnknownStatus}
             onPick={(row) => {
               // Into the capture flow with the pin's coordinates. The capture
@@ -574,15 +780,7 @@ export default function MapView() {
         </MapContainer>
       )}
 
-      <p className="capture-muted map-legend">
-        <span className="map-swatch map-swatch-catch" aria-hidden="true" /> Catch
-        <span className="map-swatch map-swatch-threat" aria-hidden="true" /> Threat report
-        {showUnknown && (
-          <>
-            <span className="map-swatch map-swatch-unknown" aria-hidden="true" /> Not caught yet
-          </>
-        )}
-      </p>
+      <MapLegend shown={layers} />
     </section>
   )
 }
