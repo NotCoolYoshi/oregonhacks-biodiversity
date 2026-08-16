@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 
+import ForestBackdrop from './ForestBackdrop'
 import HomeView from './views/HomeView'
 import PhotoCapture from './views/PhotoCapture'
 import DexView from './views/DexView'
@@ -80,6 +81,7 @@ function Nav() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ForestBackdrop />
       <div className="app">
         <header className="header">
           <h1>OregonHacks Biodiversity</h1>

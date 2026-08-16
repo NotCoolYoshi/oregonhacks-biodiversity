@@ -1,3 +1,25 @@
+/* ---------------------------------------------------------------------------
+   Forest backdrop
+
+   Fixed to the viewport rather than scrolled with the page: the scene is a
+   horizon, and a horizon that slides up and away as you scroll reads as a
+   decorative band instead of as the ground the app is standing on.
+   --------------------------------------------------------------------------- */
+
+.forest-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none; /* Never intercepts a tap meant for the map or a card. */
+  overflow: hidden;
+}
+
+.forest-backdrop svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .app {
   position: relative;
   z-index: 1; /* Above the forest backdrop, which is z-index 0 inside #root. */
