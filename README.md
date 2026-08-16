@@ -55,6 +55,7 @@ that talks to external APIs. See `docs/ARCHITECTURE.md` for why.
 | `GET` | `/api/species/:taxonId/status?lat=&lng=` | Establishment means + conservation status for a taxon **where the photo was taken** — decides catch vs. threat report. |
 | `GET` | `/api/species/:taxonId/phenology?lat=&lng=` | Monthly observation histogram; which months this species is typically visible. |
 | `GET` | `/api/region/:placeId/nearby` | Species recently observed near a place — the "catchable nearby" list. |
+| `GET` | `/api/observations/nearby?lat=&lng=&radius=&userId=` | Plants observed around a coordinate that `userId` has **not** caught — the map's "nearby unknown plants" layer. One row per taxon, 30 max. |
 | `POST` | `/api/catches` | Record a catch or a threat report, uploading its photo to storage. |
 | `GET` | `/api/catches?userId=&placeId=` | Recorded catches, newest first, with photo URLs. |
 | `GET` | `/api/region/:placeId/score` | Aggregated biodiversity health score for a region. |
@@ -63,6 +64,46 @@ The place a verdict is about comes from the submitted coordinates, not a
 constant — pass `lat`/`lng` and the server resolves the rest. A request with
 neither falls back and reports `placeSource: "fallback"` so the UI can say the
 verdict is not local.
+
+### The nearby-unknowns layer, and what it costs
+
+`/api/observations/nearby` is the only route a user can trigger by *moving*
+rather than by acting, so it is the only one whose cost scales with fidgeting.
+Four things hold that down, and all four matter:
+
+- **A ~1km grid cache, 24h** (`getNearbyObservations`). The requested radius is
+  turned into a bounding box snapped outward to a 0.01° grid, and the box is
+  the cache key — so two viewports less than a cell apart are one entry.
+- **A 900ms settle-debounce on the client** (`SETTLE_MS`). Not a throttle: the
+  timer restarts on every `moveend`, so a drag across three counties costs one
+  request, made when the user stops.
+- **A minimum-movement gate** (`MIN_MOVE_FRACTION`). A pan shorter than half the
+  viewport radius does not schedule a fetch at all — the visible area barely
+  changed, so the answer would barely change. Zoom changes are never gated: a
+  different radius is a different question.
+- **A 30-marker ceiling** (`NEARBY_MARKER_CAP`), enforced server-side and not
+  raisable by a query param, plus a client-side floor of zoom 9 below which the
+  layer switches itself off rather than pretending a continent is "nearby".
+
+The settle and the gate are the two that bite when every viewport is new
+ground, which is the case the cache cannot help — a genuinely new area is a
+genuine cache miss. They were raised from 500ms/none after the first pass
+measured a worst case of ~77 calls/min, over iNaturalist's ceiling.
+
+Measured with a real browser against real iNaturalist: **~5 calls/min for a
+normal look around, ~3/min when revisiting, and a worst case of ~30/min** for
+one user panning continuously and deliberately onto new ground — comfortably
+under iNaturalist's ~60/min courtesy ceiling. Driving the map as fast as its
+own zoom and keyboard controls allow does not get above ~20/min.
+
+Note for anyone re-measuring: a pan-around script written against the old
+500ms settle will under-report, because pauses shorter than 900ms never fire
+the timer at all. Pause past `SETTLE_MS` and pan further than the gate, or the
+numbers will look better than they are.
+
+The layer is additive and never load-bearing: every failure path ends in an
+empty layer and a console warning, and the catch markers, region strip and map
+carry on without it.
 
 ### Photo storage
 
