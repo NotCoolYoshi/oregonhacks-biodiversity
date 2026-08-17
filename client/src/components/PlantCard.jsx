@@ -81,8 +81,8 @@ export default function PlantCard({ plant = EMPTY_PLANT }) {
       <div className="plant-card__content">
         <div className="plant-card__bottom">
           <div className="plant-card__left">
-            <div className="plant-card__name">{currentPlant.name ?? 'null'}</div>
-            <div className="plant-card__id">{currentPlant.uniqueId ?? 'null'}</div>
+            <div className="plant-card__name">{currentPlant.name ?? 'Unknown'}</div>
+            <div className="plant-card__id">{currentPlant.uniqueId ?? '—'}</div>
           </div>
           <div className="plant-card__rarity">{rarity}</div>
         </div>
