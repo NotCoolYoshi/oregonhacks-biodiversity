@@ -405,6 +405,9 @@ export default function PhotoCapture() {
           taxonId: status?.taxonId ?? selected.inatTaxonId ?? undefined,
           scientificName: status?.scientificName ?? selected.scientificName,
           commonName: status?.commonName ?? selected.commonNames?.[0],
+          // Pl@ntNet's — iNaturalist's taxon lookup doesn't return one, so
+          // there's no server-side value to prefer instead.
+          family: selected.family,
           // Omitted when the preview failed: an invented claim would be
           // reported back as `typeCorrected` and confuse the result screen.
           type: status?.classification,

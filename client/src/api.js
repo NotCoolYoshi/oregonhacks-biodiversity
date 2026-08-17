@@ -135,3 +135,27 @@ export const getCurrentUser = (userId) =>
  */
 export const updateDisplayName = (userId, displayName) =>
   api.post('/api/users', { userId, displayName }).then((r) => r.data)
+
+/**
+ * GET /api/users/:userId/achievements — native and invasive badge state.
+ *
+ * Resolves to { userId, nativeSpeciesCount, invasiveSpeciesCount, nativeBadges,
+ * invasiveBadges }, where each badge is { threshold, label, unlocked }.
+ * Computed server-side on every call, not stored — see the route for why.
+ */
+export const getUserAchievements = (userId) =>
+  api.get(`/api/users/${encodeURIComponent(userId)}/achievements`).then((r) => r.data)
+
+/**
+ * GET /api/leaderboard?place_id= — users ranked by total points.
+ *
+ * Resolves to { placeId, placeName, totalResults, capped, standings }, where
+ * each standing is { userId, displayName, totalPoints, nativeSpeciesCount,
+ * invasiveSpeciesCount, uniqueSpeciesCount }. Global unless a placeId is
+ * given. Capped server-side (50) rather than paginated — `capped` says
+ * whether more contributors exist than were returned.
+ */
+export const getLeaderboard = (placeId) =>
+  api
+    .get('/api/leaderboard', { params: placeId ? { place_id: placeId } : {} })
+    .then((r) => r.data)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { getCatches } from '../api'
+import { getCatches, getUserAchievements } from '../api'
 import { groupBySpecies } from '../catalogue'
 import { getUserId } from '../session'
 import SpeciesDetail from './SpeciesDetail'
@@ -10,22 +10,25 @@ import SpeciesDetail from './SpeciesDetail'
 // (GET /api/species/:taxonId/phenology) drives "in season" badges.
 
 /**
- * Species milestones.
- *
- * Counted client-side off the catches already on screen — no invented
- * endpoint, no badge table. The thresholds themselves are a guess and the UI
- * says so.
- *
- * TODO: backend not built yet. Real badges need their own model (what unlocks
- * one, when it was earned, whether it is retired) and none of that can be
- * derived from the catch list. This is the display, not the feature.
+ * Decorative only. Thresholds, labels, and unlock state all come from
+ * GET /api/users/:userId/achievements — this just picks an emoji for a label
+ * the server already named, keyed the same way so a badge added there shows
+ * up here with a plain fallback rather than breaking.
  */
-const MILESTONES = [
-  { threshold: 1, label: 'First find', icon: '🌱' },
-  { threshold: 5, label: 'Five species', icon: '🍃' },
-  { threshold: 15, label: 'Fifteen species', icon: '🌲' },
-  { threshold: 30, label: 'Thirty species', icon: '🏔️' },
-]
+const BADGE_ICONS = {
+  'First Seed': '🌱',
+  'Tender Sprout': '🌿',
+  'Budding Grace': '🌸',
+  "Petal's Promise": '🌺',
+  'In Full Bloom': '🌻',
+  'Verdant Bloom': '🌳',
+  'Keeper of the Garden': '🏵️',
+  'First Watch': '👀',
+  'Vigilant Hand': '✋',
+  'Warden of the Wild': '🛡️',
+  'Guardian of the Grove': '⚔️',
+}
+const DEFAULT_BADGE_ICON = '🎖️'
 
 const formatDate = (iso) =>
   new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -84,20 +87,26 @@ function SpeciesCard({ species, onOpen }) {
   )
 }
 
-function MilestoneBar({ milestone, count }) {
-  const unlocked = count >= milestone.threshold
-  const progress = Math.min(count / milestone.threshold, 1)
+/**
+ * One badge row. `badge` is a { threshold, label, unlocked } from
+ * GET /api/users/:userId/achievements — `unlocked` is the server's word on
+ * it, not recomputed here. `count` is only for the progress display (how
+ * close to *this* threshold), so it stays in sync even for an already-
+ * unlocked badge that a later one hasn't caught up to.
+ */
+function MilestoneBar({ badge, count }) {
+  const progress = Math.min(count / badge.threshold, 1)
 
   return (
-    <li className={`milestone${unlocked ? ' is-unlocked' : ''}`}>
+    <li className={`milestone${badge.unlocked ? ' is-unlocked' : ''}`}>
       <span className="milestone-icon" aria-hidden="true">
-        {milestone.icon}
+        {BADGE_ICONS[badge.label] ?? DEFAULT_BADGE_ICON}
       </span>
       <span className="milestone-body">
         <span className="milestone-label">
-          {milestone.label}
+          {badge.label}
           <span className="milestone-count">
-            {Math.min(count, milestone.threshold)}/{milestone.threshold}
+            {Math.min(count, badge.threshold)}/{badge.threshold}
           </span>
         </span>
         {/* The bar is decoration over the count beside it, which is the real
@@ -116,24 +125,34 @@ export default function CatalogueView() {
   // Everyone's catches, for the expanded view's "nearby threat reports". Same
   // endpoint the map reads, unfiltered — no new route for data already served.
   const [allCatches, setAllCatches] = useState([])
+  // Native/invasive badge state from the server — null while loading or if the
+  // request failed. Never computed from `rows`: the server counts distinct
+  // species server-side, and duplicating that here would be a second place to
+  // keep in sync with GET /api/users/:userId/achievements.
+  const [achievements, setAchievements] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openTaxonId, setOpenTaxonId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
+    const userId = getUserId()
 
     Promise.all([
-      getCatches({ userId: getUserId() }),
+      getCatches({ userId }),
       // Only feeds the nearby-threats list inside a card, so a failure here
       // costs one section of one dialog. Resolving to [] keeps it from taking
       // the catalogue down with it.
       getCatches().catch(() => []),
+      // Same degradation: a failed badge fetch costs one section, not the
+      // whole page.
+      getUserAchievements(userId).catch(() => null),
     ])
-      .then(([mine, everyone]) => {
+      .then(([mine, everyone, badges]) => {
         if (cancelled) return
         setRows(mine ?? [])
         setAllCatches(everyone ?? [])
+        setAchievements(badges)
       })
       .catch((err) => {
         if (cancelled) return
@@ -154,7 +173,6 @@ export default function CatalogueView() {
   const closeDetail = useCallback(() => setOpenTaxonId(null), [])
 
   const species = groupBySpecies(rows)
-  const caught = species.filter((s) => s.type !== 'threat_report').length
   const open = species.find((s) => s.taxon_id === openTaxonId) ?? null
   const ownIds = new Set(rows.map((row) => row.id))
 
@@ -202,13 +220,36 @@ export default function CatalogueView() {
       <section className="catalogue-section">
         <div className="social-section-head">
           <h3>Badges collected</h3>
-          <span className="badge-placeholder">Provisional</span>
         </div>
-        <ul className="milestones">
-          {MILESTONES.map((m) => (
-            <MilestoneBar key={m.threshold} milestone={m} count={caught} />
-          ))}
-        </ul>
+        {!achievements ? (
+          <p className="capture-muted">
+            {loading ? 'Loading badges…' : 'Could not load badges right now.'}
+          </p>
+        ) : (
+          <>
+            <h4 className="milestones-subhead">Native species</h4>
+            <ul className="milestones">
+              {achievements.nativeBadges.map((badge) => (
+                <MilestoneBar
+                  key={badge.threshold}
+                  badge={badge}
+                  count={achievements.nativeSpeciesCount}
+                />
+              ))}
+            </ul>
+
+            <h4 className="milestones-subhead">Invasive reports</h4>
+            <ul className="milestones">
+              {achievements.invasiveBadges.map((badge) => (
+                <MilestoneBar
+                  key={badge.threshold}
+                  badge={badge}
+                  count={achievements.invasiveSpeciesCount}
+                />
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       {/* TODO: backend not built yet. Quests need their own schema and
