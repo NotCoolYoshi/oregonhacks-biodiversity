@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton } from '@clerk/clerk-react'
 
 import ForestBackdrop from './ForestBackdrop'
@@ -67,12 +67,32 @@ function Nav() {
   )
 }
 
-export default function App() {
+/**
+ * Everything that needs to know the current route. Split out from App() so
+ * that useLocation() has a Router above it — App() itself renders
+ * <BrowserRouter>, which is one level too high to call it.
+ */
+function AppShell() {
+  const location = useLocation()
+  // The banner's tips are photo-capture-oriented, not map-relevant, and its
+  // fixed positioning is what let it cover the map's zoom control on small
+  // viewports (see App.css .pin-banner) — skipping it here removes the
+  // overlap at the source rather than fighting it with z-index alone.
+  const showPinBanner = location.pathname !== '/map'
+
   return (
-    <BrowserRouter>
+    <>
       <ForestBackdrop />
-      <PinBanner />
       <div className="app">
+        {/* Rendered inside .app, not as its sibling: .app is `position:
+            relative; z-index: 1`, which makes it a stacking context of its
+            own. A pin-banner sibling to .app would out-rank that whole
+            context — Leaflet's controls and the bottom nav included — no
+            matter what z-index they carry internally. As a descendant here,
+            .pin-banner's z-index is instead compared against .nav and
+            Leaflet's panes/controls within the same context, where it's
+            meant to lose. */}
+        {showPinBanner && <PinBanner />}
         <header className="header">
           <h1>Memoflora</h1>
           <AuthStatus />
@@ -102,6 +122,14 @@ export default function App() {
 
         <Nav />
       </div>
+    </>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
     </BrowserRouter>
   )
 }

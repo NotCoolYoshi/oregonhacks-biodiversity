@@ -1411,6 +1411,31 @@ lb = await getLeaderboard()
 check('idle user is absent', !lb.body.some((row) => row.userId === 'usr_idle'),
   JSON.stringify(lb.body))
 
+console.log('\n-- leaderboard: points logged through POST /catches actually show up --')
+// Regression test for the production bug where every leaderboard row showed
+// totalPoints: 0 despite uniqueSpeciesCount being correct. That turned out to
+// be a data gap (rows logged before `sightings` existed had no points to sum),
+// not a code bug — but nothing end-to-end exercised "log a real catch, then
+// read the leaderboard" in one test, so the gap between the write path and
+// the read path went unverified. This closes that gap: unlike the fixture
+// above, which seeds `sightingsTable` directly, this goes through the actual
+// POST /catches handler — the same one that must keep writing a `sightings`
+// row for every future catch.
+resetTable()
+
+r = await post({ ...CATCH, userId: 'usr_scorer', taxonId: 126887 })
+check('the catch itself succeeds', r.status === 201, r.status)
+check('...and is scored (new catch, no streak yet)', r.body.pointsAwarded === 20,
+  r.body.pointsAwarded)
+
+lb = await getLeaderboard()
+const scorerRow = lb.body.find((row) => row.userId === 'usr_scorer')
+check('the user appears on the leaderboard', Boolean(scorerRow), JSON.stringify(lb.body))
+check('...with non-zero totalPoints reflecting the catch just logged',
+  scorerRow?.totalPoints === 20, scorerRow?.totalPoints)
+check('...and the matching species count', scorerRow?.uniqueSpeciesCount === 1,
+  scorerRow?.uniqueSpeciesCount)
+
 // ---------------------------------------------------------------------------
 // GET /api/users/:userId/achievements — native and invasive badge state.
 // ---------------------------------------------------------------------------

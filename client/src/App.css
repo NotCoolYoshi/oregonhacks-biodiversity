@@ -25,7 +25,13 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 1000;
+  /* Rendered inside .app now (see AppShell in App.jsx), so this is compared
+     against .nav (500) and Leaflet's control/pane z-indices (800/1000) within
+     .app's own stacking context — not against them as a whole subtree capped
+     at .app's z-index: 1. Kept below both on purpose: a tip banner should
+     never be able to sit on top of the bottom nav or the map's zoom
+     control. */
+  z-index: 300;
   width: 100%;
   background: rgba(109, 156, 117, 0.7);
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
