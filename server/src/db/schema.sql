@@ -26,6 +26,7 @@ create table if not exists public.catches (
   taxon_id        integer     not null,
   scientific_name text        not null,
   common_name     text,
+  rarity          text,
 
   -- 'catch'         = species is native to this place, goes in the catalogue
   -- 'threat_report' = species is introduced/invasive, gets flagged

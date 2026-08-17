@@ -1576,3 +1576,4 @@ check('...coded BAD_REQUEST', a.body.code === 'BAD_REQUEST', a.body.code)
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()
 process.exit(fail === 0 ? 0 : 1)
+

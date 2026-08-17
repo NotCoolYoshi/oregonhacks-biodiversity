@@ -1,3 +1,11 @@
+:root {
+  --plant-N: #96c24e;
+  --plant-R: #57c3c2;
+  --plant-SR: #61649f;
+  --plant-SSR: #ee2c79;
+  --plant-UR: #82202b;
+}
+
 .plant-card {
   position: relative;
   width: 200px;
@@ -10,6 +18,72 @@
   align-items: center;
   justify-content: center;
   box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff;
+  transition: box-shadow 0.3s ease, filter 0.3s ease;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/**
+ * Static border frame using ::before pseudo-element
+ * This creates the visible colored border at all times
+ * Border is static by default, animated only on hover/long-press
+ */
+.plant-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--plant-rarity-color);
+  border-radius: 14px;
+  z-index: 0;
+  pointer-events: none;
+  animation: none;
+}
+
+/**
+ * Animated border overlay using ::after pseudo-element
+ * Only activates on hover/long-press to create flowing animation
+ */
+.plant-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 2px;
+  background: linear-gradient(90deg, var(--plant-rarity-color), transparent, var(--plant-rarity-color));
+  background-size: 200% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  z-index: 1;
+  pointer-events: none;
+  animation: none;
+  opacity: 0;
+}
+
+/**
+ * Hover state: start border animation and glow
+ */
+.plant-card:hover {
+  box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff, 0 0 20px var(--plant-rarity-color);
+  filter: brightness(1.05);
+}
+
+.plant-card:hover::after {
+  animation: border-rotate 3s linear infinite;
+  opacity: 1;
+}
+
+/**
+ * Long-press state: start border animation and enhanced glow
+ */
+.plant-card.is-pressed {
+  box-shadow: 20px 20px 60px #bebebe, -20px -20px 60px #ffffff, 0 0 28px var(--plant-rarity-color);
+  filter: brightness(1.1);
+}
+
+.plant-card.is-pressed::after {
+  animation: border-rotate 3s linear infinite;
+  opacity: 1;
 }
 
 .bg {
@@ -34,7 +108,7 @@
   width: 150px;
   height: 150px;
   border-radius: 50%;
-  background-color: #ff0000;
+  background-color: var(--plant-rarity-color, var(--plant-N));
   opacity: 1;
   filter: blur(12px);
   animation: blob-bounce 5s infinite ease;
@@ -43,21 +117,63 @@
 .plant-card__content {
   position: relative;
   z-index: 3;
-  width: calc(100% - 30px);
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   justify-content: flex-end;
-  height: 100%;
-  padding: 18px 14px 18px;
+  padding: 0;
   box-sizing: border-box;
+}
+
+.plant-card__bottom {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  gap: 8px;
+}
+
+.plant-card__left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  align-items: flex-start;
+}
+
+.plant-card__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--plant-rarity-color, var(--plant-N));
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.plant-card__id {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--plant-rarity-color, var(--plant-N));
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+.plant-card__rarity {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--plant-rarity-color, var(--plant-N));
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .plant-card__row {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  color: #2a2a2a;
+  gap: 2px;
+  color: var(--plant-rarity-color, var(--plant-N));
   font-size: 12px;
   line-height: 1.35;
 }
@@ -65,18 +181,18 @@
 .plant-card__row span {
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #4c4c4c;
+  color: var(--plant-rarity-color, var(--plant-N));
 }
 
 .plant-card__row strong {
   font-size: 13px;
   font-weight: 600;
-  color: #1d1d1d;
+  color: var(--plant-rarity-color, var(--plant-N));
   word-break: break-word;
 }
 
 .plant-card__row--id {
-  margin-top: auto;
+  margin-top: 0;
 }
 
 @keyframes blob-bounce {
@@ -98,5 +214,19 @@
 
   100% {
     transform: translate(-100%, -100%) translate3d(0, 0, 0);
+  }
+}
+
+/**
+ * Border animation: animated gradient border effect
+ * Moves the gradient position to create a flowing border effect
+ */
+@keyframes border-rotate {
+  from {
+    background-position: 0% center;
+  }
+
+  to {
+    background-position: 200% center;
   }
 }
