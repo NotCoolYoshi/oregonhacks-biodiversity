@@ -48,21 +48,12 @@
 .gallery-field {
   position: relative;
   border-radius: calc(var(--radius) * 2);
-  padding: 2.75rem 2rem 3rem;
+  padding: 2.75rem 1.5rem 3rem;
   overflow: hidden;
-  background:
-    radial-gradient(
-      ellipse at 15% 10%,
-      color-mix(in srgb, var(--color-surface-blue) 65%, transparent),
-      transparent 55%
-    ),
-    radial-gradient(
-      ellipse at 88% 92%,
-      color-mix(in srgb, var(--color-field) 80%, transparent),
-      transparent 60%
-    ),
-    var(--surface);
-  border: 1px solid var(--border);
+
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .gallery-field::before,
@@ -88,7 +79,7 @@
 }
 
 .gallery-field .empty-state,
-.gallery-field > p {
+.gallery-field>p {
   position: relative;
   z-index: 1;
 }

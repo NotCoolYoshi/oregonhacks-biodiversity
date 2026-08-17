@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import PlantCard from '../components/PlantCard'
 import { useCatches } from '../hooks'
 import { useCurrentUserId } from '../session'
+import { ICON_REFERENCE } from '../iconReference'
 import '../css/Gallery.css'
 
 /** Map a catch row (snake_case from the API) to the shape PlantCard expects. */
@@ -42,9 +43,7 @@ export default function Gallery() {
         )}
         {!loading && !error && plants.length === 0 && (
           <div className="empty-state">
-            <span className="empty-icon" aria-hidden="true">
-              🌱
-            </span>
+            <img className="empty-icon" src={ICON_REFERENCE.plant} alt="" />
             <p>Nothing collected yet. Photograph a plant from the Capture tab to begin.</p>
           </div>
         )}
