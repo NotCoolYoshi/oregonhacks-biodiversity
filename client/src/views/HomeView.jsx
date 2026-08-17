@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import UserProfile from '../components/UserProfile'
+import Intro from '../components/Intro'
 import { getRegionScore } from '../api'
 
 const PLACE_ID = 10
+const INTRO_DURATION_MS = 1500
 
 export default function HomeView() {
   const navigate = useNavigate()
   const [score, setScore] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showIntro, setShowIntro] = useState(true)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowIntro(false), INTRO_DURATION_MS)
+    return () => clearTimeout(timer)
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -24,7 +32,9 @@ export default function HomeView() {
   }, [])
 
   return (
-    <div className="home">
+    <>
+      {showIntro && <Intro durationMs={INTRO_DURATION_MS} />}
+      <div className="home">
       <div className="home-header">
         <div className="home-profile-glass">
           <UserProfile />
@@ -81,5 +91,8 @@ export default function HomeView() {
         </section>
       </div>
     </div>
+    </>
   )
 }
+
+
