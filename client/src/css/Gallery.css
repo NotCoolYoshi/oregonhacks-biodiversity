@@ -1,12 +1,5 @@
 /* ---------------------------------------------------------------------------
    Gallery — botanical collection view
-
-   A curated display for the plants a user has caught, built entirely from
-   the existing Plant Card component and Tide & Timber's own tokens
-   (theme.css) — no new palette, just more room to let the cards be the
-   colour. The cards already carry their own shine (blob glow, rarity border),
-   so this file stays flat: soft washes and a gentle scatter, no gradients,
-   glass or heavy shadows layered on top.
    --------------------------------------------------------------------------- */
 
 .gallery {
@@ -14,6 +7,11 @@
   flex-direction: column;
   gap: 1.75rem;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
 
 .gallery-header {
   text-align: center;
@@ -40,29 +38,45 @@
   color: var(--text-h);
 }
 
-/* Field-journal backdrop for the cards: two soft washes of the palette's own
-   surface colours rather than a flat block, plus a pair of faint leaf marks
-   in the corners for atmosphere. No blur and no glass — those are reserved
-   for the chrome elsewhere in the app, and would fight the cards for
-   attention here. */
+
+/* ---------------------------------------------------------------------------
+   Gallery field
+   Transparent so it blends into the main green page background.
+   No blue panel and no white border.
+   --------------------------------------------------------------------------- */
+
 .gallery-field {
   position: relative;
-  border-radius: calc(var(--radius) * 2);
+
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+
   padding: 2.75rem 1.5rem 3rem;
+
   overflow: hidden;
 
   background: transparent;
   border: none;
   box-shadow: none;
+
+  border-radius: calc(var(--radius) * 2);
 }
+
+
+/* Decorative botanical marks */
 
 .gallery-field::before,
 .gallery-field::after {
   content: '🌿';
+
   position: absolute;
+
   font-size: 3.5rem;
   line-height: 1;
-  opacity: 0.1;
+
+  opacity: 0.08;
+
   pointer-events: none;
 }
 
@@ -78,30 +92,61 @@
   transform: rotate(160deg);
 }
 
+
+/* Empty state / text stays above decoration */
+
 .gallery-field .empty-state,
 .gallery-field>p {
   position: relative;
   z-index: 1;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Gallery grid
+   --------------------------------------------------------------------------- */
+
 .gallery-grid {
   position: relative;
   z-index: 1;
+
   display: flex;
   flex-wrap: wrap;
+
   justify-content: center;
   align-items: flex-start;
-  gap: 2.75rem 2.25rem;
+
+  width: 100%;
+  max-width: 100%;
+
+  box-sizing: border-box;
+
+  gap: 2.75rem 1.5rem;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Individual card slot
+   --------------------------------------------------------------------------- */
 
 .gallery-slot {
   position: relative;
-  transition: transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+
+  box-sizing: border-box;
+
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
-/* A gentle scatter rather than a rigid grid — six-step cycle so no two
-   neighbours lean the same way. Small enough to read as a hand-arranged
-   collection, not a shuffled deck. */
+
+/* ---------------------------------------------------------------------------
+   Gentle scattered arrangement
+   --------------------------------------------------------------------------- */
+
 .gallery-slot:nth-child(6n + 1) {
   transform: translateY(-8px) rotate(-1.4deg);
 }
@@ -126,24 +171,135 @@
   transform: translateY(4px) rotate(-0.5deg);
 }
 
-/* Straightens up and lifts on hover, on top of whatever the Plant Card's own
-   ::after border animation is already doing underneath. */
+
+/* ---------------------------------------------------------------------------
+   Hover
+   --------------------------------------------------------------------------- */
+
 .gallery-slot:hover {
   transform: translateY(-10px) scale(1.035) rotate(0deg);
   z-index: 2;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Mobile
+   --------------------------------------------------------------------------- */
+
 @media (max-width: 26rem) {
+
   .gallery-field {
+    width: 100%;
+    max-width: 100%;
+
     padding: 2.25rem 1rem 2.5rem;
+
+    border-radius: 0;
   }
 
+
   .gallery-grid {
-    gap: 2rem 1.25rem;
+    width: 100%;
+    max-width: 100%;
+
+    gap: 2rem 1rem;
+  }
+
+
+  /*
+     Keep every card safely inside the green page area.
+     Adjust 180px if your Plant Card is intentionally larger.
+  */
+
+  .gallery-slot {
+    width: min(180px, 100%);
+    max-width: 100%;
+  }
+
+
+  /*
+     Prevent the Plant Card itself from overflowing
+     its gallery slot.
+  */
+
+  .gallery-slot>* {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+
+    box-sizing: border-box;
+  }
+
+
+  /* Reduce rotation on small screens */
+
+  .gallery-slot:nth-child(6n + 1) {
+    transform: translateY(-4px) rotate(-0.6deg);
+  }
+
+  .gallery-slot:nth-child(6n + 2) {
+    transform: translateY(5px) rotate(0.5deg);
+  }
+
+  .gallery-slot:nth-child(6n + 3) {
+    transform: translateY(-2px) rotate(0.3deg);
+  }
+
+  .gallery-slot:nth-child(6n + 4) {
+    transform: translateY(4px) rotate(-0.4deg);
+  }
+
+  .gallery-slot:nth-child(6n + 5) {
+    transform: translateY(-5px) rotate(0.5deg);
+  }
+
+  .gallery-slot:nth-child(6n) {
+    transform: translateY(3px) rotate(-0.3deg);
+  }
+
+
+  /* Hover should not make the card escape the container */
+
+  .gallery-slot:hover {
+    transform: translateY(-6px) scale(1.02) rotate(0deg);
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+   Plant Card safety rule
+   --------------------------------------------------------------------------- */
+
+/*
+   If Plant Card uses .plant-card as its outermost element,
+   these rules prevent it from exceeding the gallery width.
+*/
+
+.plant-card {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+
+/* Images should never overflow the card */
+
+.plant-card img {
+  display: block;
+
+  max-width: 100%;
+  height: auto;
+
+  box-sizing: border-box;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+   --------------------------------------------------------------------------- */
+
 @media (prefers-reduced-motion: reduce) {
+
   .gallery-slot {
     transition: none;
   }
