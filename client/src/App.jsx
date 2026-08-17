@@ -9,6 +9,7 @@ import CatalogueView from './views/CatalogueView'
 import MapView from './views/MapView'
 import SocialView from './views/SocialView'
 import PlantCardTest from './views/PlantCard_test'
+import GalleryTest from './views/Gallery_test'
 
 import './App.css'
 
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/map" element={<MapView />} />
             <Route path="/social" element={<SocialView />} />
             <Route path="/plant" element={<PlantCardTest />} />
+            <Route path="/gallery" element={<GalleryTest />} />
             <Route path="*" element={<p>Not found.</p>} />
           </Routes>
         </main>

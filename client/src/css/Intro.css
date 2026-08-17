@@ -1,0 +1,80 @@
+/* Full-screen splash. --intro-duration is set inline by the component so a
+   single timeline drives both the content pulse-in and the overlay's
+   fade/scale exit — the JS timer that unmounts it just has to match. */
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  animation: intro-exit var(--intro-duration, 1500ms) ease forwards;
+}
+
+.intro__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: intro-content-in var(--intro-duration, 1500ms) ease forwards;
+}
+
+.intro__icon {
+  width: 56px;
+  height: 56px;
+}
+
+.intro__label {
+  font-family: var(--heading);
+  font-size: 32px;
+  letter-spacing: -0.6px;
+  color: var(--text-h);
+}
+
+/* Held fully visible until the last third of the timeline, then fades and
+   scales out so the gallery underneath never gets an abrupt reveal. */
+@keyframes intro-exit {
+  0%,
+  66% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+/* Icon/label settle in over the first fifth of the timeline, then hold. */
+@keyframes intro-content-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(6px);
+  }
+  20%,
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro {
+    animation: intro-exit-reduced 200ms linear forwards;
+    animation-delay: calc(var(--intro-duration, 1500ms) - 200ms);
+  }
+  .intro__content {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  @keyframes intro-exit-reduced {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+}
