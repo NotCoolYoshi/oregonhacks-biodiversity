@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import UserProfile from '../components/UserProfile'
+import EcoFactsPanel from '../components/EcoFactsPanel'
 import Intro from '../components/Intro'
 import { getRegionScore } from '../api'
 
@@ -65,30 +66,53 @@ export default function HomeView() {
         )}
 
         <section className="home-actions">
-          <div className="action-card action-capture" onClick={() => navigate('/capture')}>
+          {/* onTouchStart is a no-op handler, not dead code: iOS Safari only
+              applies :active styles to an element that has a touch listener
+              of its own (or an ancestor's), so without this the glass press
+              feedback in App.css (.action-card:active) never fires on a real
+              phone tap — only on desktop via :hover/:active from a mouse. */}
+          <div
+            className="action-card action-capture"
+            onClick={() => navigate('/capture')}
+            onTouchStart={() => {}}
+          >
             <div className="action-icon">📸</div>
             <h3>Capture</h3>
             <p>Identify a plant from a photo</p>
           </div>
 
-          <div className="action-card action-catalogue" onClick={() => navigate('/catalogue')}>
+          <div
+            className="action-card action-catalogue"
+            onClick={() => navigate('/catalogue')}
+            onTouchStart={() => {}}
+          >
             <div className="action-icon">📖</div>
             <h3>Catalogue</h3>
             <p>View native species you found</p>
           </div>
 
-          <div className="action-card action-map" onClick={() => navigate('/map')}>
+          <div
+            className="action-card action-map"
+            onClick={() => navigate('/map')}
+            onTouchStart={() => {}}
+          >
             <div className="action-icon">🗺️</div>
             <h3>Map</h3>
             <p>See recent captures nearby</p>
           </div>
 
-          <div className="action-card action-social" onClick={() => navigate('/social')}>
+          <div
+            className="action-card action-social"
+            onClick={() => navigate('/social')}
+            onTouchStart={() => {}}
+          >
             <div className="action-icon">🏆</div>
             <h3>Social</h3>
             <p>Leaderboard, friends and quests</p>
           </div>
         </section>
+
+        <EcoFactsPanel />
       </div>
     </div>
     </>

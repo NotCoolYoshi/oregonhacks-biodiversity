@@ -98,6 +98,12 @@
      above the viewport edge) so the last element of a view is never hidden
      underneath it. */
   padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  /* Side padding shared by every route (header + main), so content never
+     runs edge-to-edge on a phone. .nav and .pin-banner are both `position:
+     fixed`, sized against the viewport rather than this box, so they are
+     unaffected by it. */
+  padding-left: 1.1rem;
+  padding-right: 1.1rem;
   box-sizing: border-box;
   text-align: left;
 }
@@ -500,7 +506,12 @@
   display: flex;
   flex-direction: column;
   gap: 2rem;
-  max-width: 40rem;
+  width: 100%;
+  /* ~480px, well under .app's shared 960px cap. On phone widths this never
+     binds — the viewport itself is narrower — but on tablet/desktop it keeps
+     Home from stretching full-bleed across the whole app column. */
+  max-width: 30rem;
+  margin: 0 auto;
 }
 
 .home-header {
@@ -630,6 +641,10 @@
   gap: 1rem;
 }
 
+/* Glass, matching .home-profile-glass/.pin-banner rather than the flat
+   --surface cards used elsewhere: Home renders directly over ForestBackdrop,
+   so a frosted look reads as part of the same scene instead of a UI panel
+   dropped on top of it. */
 .action-card {
   display: flex;
   flex-direction: column;
@@ -637,9 +652,15 @@
   gap: 0.7rem;
   padding: 1.2rem;
   border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(19, 33, 27, 0.12);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
   cursor: pointer;
+  /* Tap highlight is a flat grey flash on mobile that would fight the glass
+     look and the custom :active feedback below. */
+  -webkit-tap-highlight-color: transparent;
   transition:
     background-color 0.2s ease,
     border-color 0.2s ease,
@@ -648,11 +669,26 @@
   text-align: center;
 }
 
-.action-card:hover {
-  border-color: var(--accent-border);
-  background: var(--surface-raised);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow);
+/* Scoped to hover-capable pointers so a tap on touch doesn't leave the card
+   stuck in a "hovered" look until the next unrelated tap elsewhere. */
+@media (hover: hover) and (pointer: fine) {
+  .action-card:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.22);
+    transform: translateY(-2px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 14px 28px rgba(19, 33, 27, 0.18);
+  }
+}
+
+/* The actual "responds to a real tap" feedback: a quick scale + opacity/tint
+   shift on press, independent of hover. Requires the onTouchStart no-op in
+   HomeView.jsx — see the comment there — or iOS Safari never applies this. */
+.action-card:active {
+  border-color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 4px 10px rgba(19, 33, 27, 0.16);
+  transition-duration: 0.08s;
 }
 
 .action-card:focus-visible {
@@ -674,6 +710,78 @@
   margin: 0;
   font-size: 0.8rem;
   color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Eco-facts panel (Home only)
+
+   Same glass treatment as .action-card/.home-profile-glass, but this one is
+   in Home's normal document flow — no position: fixed, no mount in App.jsx
+   (see components/EcoFactsPanel.jsx). It is a curated-strings, one-at-a-time
+   panel like .pin-banner is, just anchored to the page instead of the
+   viewport, so it can never reintroduce the stacking/overlap issue fixed in
+   .pin-banner (see the z-index note above).
+   --------------------------------------------------------------------------- */
+
+.eco-facts {
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(19, 33, 27, 0.12);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+}
+
+.eco-facts-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem;
+  box-sizing: border-box;
+}
+
+.eco-facts-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  object-fit: contain;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.eco-facts-inner p {
+  flex: 1;
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: var(--text-h);
+}
+
+.eco-facts-next {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .eco-facts-next:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+}
+
+.eco-facts-next:active {
+  background: rgba(255, 255, 255, 0.34);
+  transform: scale(0.94);
+  transition-duration: 0.08s;
 }
 
 /* User profile styling ---------------------------------------------------- */
