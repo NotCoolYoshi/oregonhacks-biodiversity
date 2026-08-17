@@ -1459,6 +1459,29 @@ lb = await getLeaderboard('?limit=9999')
 check('a limit above the ceiling is clamped, not honored',
   lb.body.standings.length === 50, lb.body.standings.length)
 
+// ---------------------------------------------------------------------------
+// GET /api/supabase/all — fetches all Supabase data (catches, users, counts)
+// ---------------------------------------------------------------------------
+const getAllSupabaseDataTest = async () => {
+  const res = await realFetch(`${base}/api/supabase/all`)
+  return { status: res.status, body: await res.json() }
+}
+
+console.log('\n-- GET /api/supabase/all --')
+resetTable()
+usersTable.push({ user_id: 'usr_all1', display_name: 'Test Explorer', created_at: '2026-01-01T00:00:00.000Z' })
+seedAchievementRow('usr_all1', 9901, 'catch')
+seedAchievementRow('usr_all1', 9902, 'threat_report')
+
+const allData = await getAllSupabaseDataTest()
+check('GET /api/supabase/all returns 200', allData.status === 200, allData.status)
+check('catches array returns records', allData.body.catches.length === 2, allData.body.catches.length)
+check('users array returns records', allData.body.users.length === 1, allData.body.users.length)
+check('counts matches data lengths', allData.body.counts.catches === 2 && allData.body.counts.users === 1, JSON.stringify(allData.body.counts))
+check('source is supabase', allData.body.source === 'supabase', allData.body.source)
+check('timestamp is present', typeof allData.body.timestamp === 'string', allData.body.timestamp)
+
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()
 process.exit(fail === 0 ? 0 : 1)
+

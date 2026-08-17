@@ -159,3 +159,11 @@ export const getLeaderboard = (placeId) =>
   api
     .get('/api/leaderboard', { params: placeId ? { place_id: placeId } : {} })
     .then((r) => r.data)
+
+/**
+ * GET /api/supabase/all — fetch all data from Supabase (catches, users, counts).
+ *
+ * Resolves to { catches: [...], users: [...], counts: { catches, users }, source: 'supabase', timestamp }.
+ */
+export const getAllSupabaseData = () =>
+  api.get('/api/supabase/all').then((r) => r.data)

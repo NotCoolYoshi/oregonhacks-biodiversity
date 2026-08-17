@@ -859,6 +859,49 @@ router.get('/catches', async (req, res, next) => {
 })
 
 /**
+ * GET /api/supabase/all
+ * Fetches all data stored in Supabase tables (`catches` and `users`) along with counts and metadata.
+ */
+router.get('/supabase/all', async (req, res, next) => {
+  if (!requireDatabase(res)) return
+
+  try {
+    const sb = getSupabase()
+
+    const [{ data: catches, error: catchesErr }, { data: users, error: usersErr }] =
+      await Promise.all([
+        sb.from('catches')
+          .select(
+            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, confidence, created_at',
+          )
+          .order('created_at', { ascending: false })
+          .limit(SCAN_LIMIT),
+        sb.from('users')
+          .select('user_id, display_name, created_at')
+          .order('created_at', { ascending: false })
+          .limit(SCAN_LIMIT),
+      ])
+
+    if (catchesErr) throw toDatabaseError(catchesErr, 'catches')
+    if (usersErr) throw toDatabaseError(usersErr, 'users')
+
+    res.json({
+      catches: catches ?? [],
+      users: users ?? [],
+      counts: {
+        catches: catches?.length ?? 0,
+        users: users?.length ?? 0,
+      },
+      source: 'supabase',
+      timestamp: new Date().toISOString(),
+    })
+  } catch (err) {
+    handleRouteError(err, 'supabase/all', res, next)
+  }
+})
+
+
+/**
  * POST /api/users
  * Body: { userId, displayName? }
  * Creates the user's row, or renames an existing one. Idempotent.
