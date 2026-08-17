@@ -16,6 +16,7 @@ import {
 } from '../services/inaturalist.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
 import { uploadCatchPhoto, PhotoStorageError } from '../services/photoStorage.js'
+import { requireClerkUser } from '../middleware/clerkAuth.js'
 
 const router = Router()
 
@@ -30,10 +31,6 @@ const router = Router()
  */
 const FALLBACK_PLACE_ID = 10 // iNaturalist place_id for Oregon
 
-// Threat reports are worth more than catches: spotting an invasive is the
-// action we actually want out of this app, and it is the less fun one.
-const POINTS = { catch: 10, threat_report: 25 }
-
 // Region score tuning. A region hits 100 on a component when it reaches the
 // target; these are demo-scale guesses, not ecology.
 const NATIVE_SPECIES_TARGET = 50
@@ -46,12 +43,6 @@ const SCAN_LIMIT = 10_000
 // Long enough for a real name, short enough that it cannot wreck the profile
 // header it is rendered into.
 const MAX_DISPLAY_NAME = 60
-
-// A hard ceiling a caller can lower but not raise — same shape as
-// NEARBY_MARKER_CAP below. "Top 50" is a reasonable board for a hackathon-
-// scale user base; if this ever needs real pagination, that is a sign the
-// user base outgrew a single unpaginated read anyway.
-const LEADERBOARD_LIMIT = 50
 
 // ---------------------------------------------------------------------------
 // Badges
@@ -256,6 +247,7 @@ router.post('/identify', async (req, res, next) => {
 const SCHEMA_SOURCE = {
   catches: { create: 'server/src/db/schema.sql', grant: 'migration 001' },
   users: { create: 'server/src/db/migrations/003_add_users_table.sql', grant: 'migration 003' },
+  sightings: { create: 'server/src/db/migrations/005_add_sightings.sql', grant: 'migration 005' },
 }
 
 /**
@@ -336,6 +328,88 @@ function requireDatabase(res) {
     code: 'DB_NOT_CONFIGURED',
   })
   return false
+}
+
+// ---------------------------------------------------------------------------
+// Scoring
+//
+// Every submission to POST /api/catches logs one `sightings` row (see
+// migration 005) and is worth points on a three-tier scale, keyed by whether
+// this is the first time ever this user has logged this species ('new'),
+// the first sighting of it *today* after an earlier day ('repeat_daily'), or
+// an additional sighting of it later the same day ('repeat_extra' — the
+// token amount that makes re-photographing one backyard plant stop being
+// worth it). threat_report keeps the old flat POINTS constant's asymmetry
+// (2.5x a catch): spotting an invasive is the action this app actually
+// wants, and it is the less fun one.
+//
+// Streak: a multiplier on top of the tier, for consecutive days with at
+// least one sighting. +0.1x per 5-day block, capped at 2x (a 50-day streak
+// maxes it out). computeStreakDays() is the only place that counts
+// consecutive days; both POST /catches and GET /users/:userId call it, with
+// `includesToday` deciding whether "right now" counts as a day of activity
+// (true when a submission is actually happening) or the streak is being
+// reported as it already stands (false, for a plain profile read).
+// ---------------------------------------------------------------------------
+const SCORING = {
+  catch: { new: 20, repeat_daily: 10, repeat_extra: 1 },
+  threat_report: { new: 50, repeat_daily: 25, repeat_extra: 3 },
+}
+
+const STREAK_STEP_DAYS = 5
+const STREAK_STEP_BONUS = 0.1
+const STREAK_MULTIPLIER_CAP = 2
+
+const streakMultiplier = (streakDays) =>
+  Math.min(STREAK_MULTIPLIER_CAP, 1 + Math.floor(streakDays / STREAK_STEP_DAYS) * STREAK_STEP_BONUS)
+
+const utcDay = (iso) => new Date(iso).toISOString().slice(0, 10)
+
+/**
+ * Consecutive days (ending today) with at least one sighting.
+ *
+ * `includesToday: true` is the write path — a submission is happening right
+ * now, so today counts as active even before its sighting row exists.
+ * `includesToday: false` is a plain read (the profile) — today only counts
+ * if a sighting already landed earlier in the day.
+ *
+ * Capped at 500 rows: enough days of history for any realistic streak, same
+ * guard-rail spirit as SCAN_LIMIT elsewhere, not a real page.
+ */
+async function computeStreakDays(sb, userId, { includesToday = false } = {}) {
+  const { data, error } = await sb
+    .from('sightings')
+    .select('created_at')
+    .eq('user_id', userId)
+    .limit(500)
+
+  if (error) throw toDatabaseError(error, 'sightings')
+
+  const days = new Set((data ?? []).map((row) => utcDay(row.created_at)))
+  if (includesToday) days.add(utcDay(new Date().toISOString()))
+
+  let streak = 0
+  const cursor = new Date()
+  while (days.has(utcDay(cursor.toISOString()))) {
+    streak += 1
+    cursor.setUTCDate(cursor.getUTCDate() - 1)
+  }
+  return streak
+}
+
+/** How many sightings of this taxon this user has already logged today. */
+async function todaysSightingCount(sb, userId, taxonId) {
+  const { data, error } = await sb
+    .from('sightings')
+    .select('created_at')
+    .eq('user_id', userId)
+    .eq('taxon_id', taxonId)
+    .limit(500)
+
+  if (error) throw toDatabaseError(error, 'sightings')
+
+  const today = utcDay(new Date().toISOString())
+  return (data ?? []).filter((row) => utcDay(row.created_at) === today).length
 }
 
 /**
@@ -584,9 +658,16 @@ router.get('/observations/nearby', async (req, res, next) => {
 
 /**
  * POST /api/catches
- * Body: { userId, taxonId, scientificName, commonName, family, type, location: { lat, lng },
+ * Auth required: Authorization: Bearer <Clerk session JWT>.
+ * Body: { taxonId, scientificName, commonName, family, type, location: { lat, lng },
  *         placeId, photoUrl, confidence }
  * Records a capture or a threat report.
+ *
+ * `userId` is Clerk's, from requireClerkUser() — not the body. Same reasoning
+ * as `type` below: a client that could name its own identity could write
+ * catches into someone else's catalogue. Any `userId` the body still carries
+ * (older clients, or the pre-auth localStorage id — see client/src/session.js)
+ * is ignored.
  *
  * `location` decides the place, and through it the native/invasive verdict —
  * see resolvePlaceForRequest(). `placeId` is accepted but no longer expected
@@ -597,17 +678,20 @@ router.get('/observations/nearby', async (req, res, next) => {
  * iNaturalist family lookup for this route to prefer instead. Trusted at the
  * same level lat/lng already are: not a classification, so nothing here turns
  * on it being right.
+ *
+ * A repeat of a species this user already logged at this exact place used to
+ * 409 here. It no longer does: it still does not create a second `catches`
+ * row, but it succeeds, logs a `sightings` row (see migration 005), and is
+ * scored at a lower tier instead of being rejected — see the Scoring section
+ * above and `newCatalogueEntry`/`tier`/`pointsAwarded` on the response below.
  */
-router.post('/catches', async (req, res, next) => {
+router.post('/catches', requireClerkUser, async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   const body = req.body ?? {}
-  const userId = String(body.userId ?? '').trim()
+  const userId = req.clerkUserId
   const location = body.location ?? {}
 
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
-  }
   if (!body.taxonId && !body.scientificName) {
     return res
       .status(400)
@@ -657,11 +741,12 @@ router.post('/catches', async (req, res, next) => {
     // history with this taxon:
     //
     //   isFirstCatch — has this user logged this species ANYWHERE before?
-    //                  Drives the catalogue's new-entry celebration, so it has to be
-    //                  read before the insert or it is always false.
-    //   duplicate    — has this user already logged it in THIS place? That is
-    //                  the same row twice, and it is how you farm points by
-    //                  photographing one blackberry bush repeatedly.
+    //                  Drives the catalogue's new-entry celebration AND the
+    //                  'new' scoring tier, so it has to be read before any
+    //                  insert or it is always false.
+    //   priorHere    — has this user already logged it in THIS exact place?
+    //                  Used to gate a second `catches` row, not to reject the
+    //                  request — see the doc comment above.
     //
     // The two differ deliberately: the same species in a new region is a real
     // observation worth recording, just not a new catalogue entry.
@@ -673,53 +758,59 @@ router.post('/catches', async (req, res, next) => {
 
     if (existingError) throw toDatabaseError(existingError)
 
-    const priorHere = existing?.find((row) => Number(row.place_id) === placeId)
-    if (priorHere) {
-      return res.status(409).json({
-        error:
-          `You have already logged ${status.scientificName} in ` +
-          `${place.placeName}. Catch it somewhere else for another entry.`,
-        code: 'DUPLICATE_CATCH',
-        existingCatchId: priorHere.id,
-      })
-    }
-
     const isFirstCatch = (existing?.length ?? 0) === 0
+    const priorHere = existing?.find((row) => Number(row.place_id) === placeId)
 
-    // Store the photo before the row, so a row never points at an object that
-    // failed to upload. The other order is worse: a broken image in the
-    // catalogue is invisible until someone opens the card, while a failed
-    // upload here is reported immediately and costs the user one retry.
-    //
-    // Deliberately after the duplicate check — no point spending an upload on
-    // a catch that is about to be refused.
+    // Prefer iNaturalist's names over the client's: they are canonical, and
+    // scientific_name is NOT NULL on `catches`. Computed once and reused for
+    // both the (possible) catalogue insert and the response, so a repeat that
+    // writes no catches row still reports the same values a fresh one would.
+    const scientificName = status.scientificName ?? body.scientificName ?? null
+    const commonName = status.commonName ?? body.commonName ?? null
+    const family = String(body.family ?? '').trim() || null
+    const lat = Number.isFinite(Number(location.lat)) ? Number(location.lat) : null
+    const lng = Number.isFinite(Number(location.lng)) ? Number(location.lng) : null
+    const confidenceValue = Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null
+
+    // Store the photo before any insert, so nothing ever points at an object
+    // that failed to upload. Runs for every submission, including repeats — a
+    // repeat photo is a real photo, and it lands on the sighting even when
+    // there is no new catalogue row to hang it off.
     let photoUrl = body.photoUrl ?? null
     if (body.photoBase64) {
       photoUrl = await uploadCatchPhoto(body.photoBase64, userId)
     }
 
-    const { data: row, error: insertError } = await sb
-      .from('catches')
-      .insert({
-        user_id: userId,
-        taxon_id: taxonId,
-        // Prefer iNaturalist's names over the client's: they are canonical,
-        // and scientific_name is NOT NULL.
-        scientific_name: status.scientificName ?? body.scientificName ?? null,
-        common_name: status.commonName ?? body.commonName ?? null,
-        family: String(body.family ?? '').trim() || null,
-        type,
-        place_id: placeId,
-        place_name: place.placeName,
-        lat: Number.isFinite(Number(location.lat)) ? Number(location.lat) : null,
-        lng: Number.isFinite(Number(location.lng)) ? Number(location.lng) : null,
-        photo_url: photoUrl,
-        confidence: Number.isFinite(Number(body.confidence)) ? Number(body.confidence) : null,
-      })
-      .select()
-      .single()
+    // The catalogue only ever gains a row the first time this user logs this
+    // species anywhere, or the first time in a new place (`!priorHere`
+    // covers both). An exact repeat — same user, same taxon, same place —
+    // touches no `catches` row; it only logs a sighting, below.
+    let row = null
+    if (!priorHere) {
+      const { data: inserted, error: insertError } = await sb
+        .from('catches')
+        .insert({
+          user_id: userId,
+          taxon_id: taxonId,
+          scientific_name: scientificName,
+          common_name: commonName,
+          family,
+          type,
+          place_id: placeId,
+          place_name: place.placeName,
+          lat,
+          lng,
+          photo_url: photoUrl,
+          confidence: confidenceValue,
+        })
+        .select()
+        .single()
 
-    if (insertError) throw toDatabaseError(insertError)
+      if (insertError) throw toDatabaseError(insertError)
+      row = inserted
+    }
+
+    const catchId = row?.id ?? priorHere?.id ?? null
 
     // This catch's position within (user_id, family) — "your 3rd Rosaceae
     // catch." A read after the insert, not a stored counter: the row just
@@ -727,12 +818,13 @@ router.post('/catches', async (req, res, next) => {
     // both the count and the correct sequence number for it in one query,
     // with no separate increment step that could drift from reality.
     //
-    // Only meaningful when this catch carries a family. Rows with no family —
-    // either this client sent none, or the catch predates migration 004 —
-    // don't match `.eq('family', ...)` against anything and so never enter
-    // anyone's count; see that migration's comment for why that's correct.
+    // Only meaningful for a row just inserted with a family — an exact repeat
+    // creates no new catalogue membership to count, and a row with no family
+    // (this client sent none, or the catch predates migration 004) never
+    // matches `.eq('family', ...)` against anything; see that migration's
+    // comment for why that's correct.
     let familySequence = null
-    if (row.family) {
+    if (row?.family) {
       const { data: familyRows, error: familyError } = await sb
         .from('catches')
         .select('id')
@@ -743,27 +835,62 @@ router.post('/catches', async (req, res, next) => {
       familySequence = familyRows.length
     }
 
+    // ---------------------------------------------------------------------
+    // Scoring — every submission logs a sighting, whether or not it created
+    // a catalogue row. See the Scoring section near the top of this file for
+    // the tiers and the streak formula.
+    // ---------------------------------------------------------------------
+    const todayCount = await todaysSightingCount(sb, userId, taxonId)
+    const tier = isFirstCatch ? 'new' : todayCount === 0 ? 'repeat_daily' : 'repeat_extra'
+    const basePoints = SCORING[type][tier]
+    const streakDays = await computeStreakDays(sb, userId, { includesToday: true })
+    const multiplier = streakMultiplier(streakDays)
+    const pointsAwarded = Math.round(basePoints * multiplier)
+
+    const { error: sightingError } = await sb.from('sightings').insert({
+      user_id: userId,
+      taxon_id: taxonId,
+      catch_id: catchId,
+      type,
+      tier,
+      base_points: basePoints,
+      streak_days: streakDays,
+      streak_multiplier: multiplier,
+      points_awarded: pointsAwarded,
+      place_id: placeId,
+      photo_url: photoUrl,
+    })
+
+    if (sightingError) throw toDatabaseError(sightingError, 'sightings')
+
     res.status(201).json({
-      id: row.id,
-      userId: row.user_id,
-      type: row.type,
-      taxonId: row.taxon_id,
-      scientificName: row.scientific_name,
-      commonName: row.common_name,
-      family: row.family,
+      id: catchId,
+      userId,
+      type,
+      taxonId,
+      scientificName,
+      commonName,
+      family,
       familySequence,
-      placeId: row.place_id,
-      placeName: row.place_name,
+      placeId,
+      placeName: place.placeName,
       // Which rule named the place. 'fallback' is the one worth showing a user:
       // it means the verdict above is about FALLBACK_PLACE_ID, not about where
       // they are standing.
       placeSource: place.source,
-      location: { lat: row.lat, lng: row.lng },
-      photoUrl: row.photo_url,
-      confidence: row.confidence == null ? null : Number(row.confidence),
+      location: { lat, lng },
+      photoUrl,
+      confidence: confidenceValue,
       isFirstCatch,
-      pointsAwarded: POINTS[row.type],
-      createdAt: row.created_at,
+      // False for an exact repeat: this submission scored, but did not add a
+      // card to the catalogue. True for a first-ever catch and for the same
+      // species logged in a new place, which both do.
+      newCatalogueEntry: !priorHere,
+      tier,
+      pointsAwarded,
+      streakDays,
+      streakMultiplier: multiplier,
+      createdAt: row?.created_at ?? new Date().toISOString(),
 
       // Additive, so the existing contract still holds. These let the client
       // explain itself when it guessed wrong ("that's an invasive — logged as
@@ -903,32 +1030,29 @@ router.get('/supabase/all', async (req, res, next) => {
 
 /**
  * POST /api/users
- * Body: { userId, displayName? }
+ * Auth required: Authorization: Bearer <Clerk session JWT>.
+ * Body: { displayName? }
  * Creates the user's row, or renames an existing one. Idempotent.
  *
- * There are no accounts: `userId` is the string the browser generated and kept
- * in localStorage (see client/src/session.js), and this route takes it on
- * trust exactly as POST /catches does. All this table adds is a name to put
- * next to it.
+ * `userId` is Clerk's, from requireClerkUser() — not the body. Previously this
+ * was the string the browser generated and kept in localStorage (see
+ * client/src/session.js), taken on trust; that trust boundary is what this
+ * middleware replaces. Any `userId` the body still carries is ignored.
  *
  * Two callers, one route:
- *   { userId }                  first load — establish a row, keep any name it
+ *   {}                          first load — establish a row, keep any name it
  *                               already has, generate one if it has none.
- *   { userId, displayName }     the rename action — overwrite it.
+ *   { displayName }             the rename action — overwrite it.
  *
  * A blank or whitespace-only displayName counts as "not supplied" rather than
  * an instruction to erase the name; a user who clears the rename field and
  * submits gets to keep what they had.
  */
-router.post('/users', async (req, res, next) => {
+router.post('/users', requireClerkUser, async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   const body = req.body ?? {}
-  const userId = String(body.userId ?? '').trim()
-
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
-  }
+  const userId = req.clerkUserId
 
   const requestedName = String(body.displayName ?? '').trim()
   const hasDisplayName = requestedName !== ''
@@ -1023,8 +1147,13 @@ router.post('/users', async (req, res, next) => {
  *   uniqueSpeciesCount distinct taxa, so the same species logged in two places
  *                      is one entry in the catalogue. This is what the profile shows
  *                      as "Owned".
- *   totalPoints        POINTS applied per row, from the same table the award
- *                      on POST /catches reads.
+ *   totalPoints        the sum of points_awarded across this user's
+ *                      `sightings` rows — the same column POST /catches
+ *                      writes and GET /leaderboard sums, so all three always
+ *                      agree.
+ *   currentStreakDays,
+ *   streakMultiplier   read-only: `includesToday: false`, so viewing your
+ *                      profile does not itself extend a streak.
  */
 router.get('/users/:userId', async (req, res, next) => {
   if (!requireDatabase(res)) return
@@ -1040,23 +1169,29 @@ router.get('/users/:userId', async (req, res, next) => {
     const [
       { data: found, error: userError },
       { data: rows, error: catchError },
+      { data: sightingRows, error: sightingError },
     ] = await Promise.all([
       sb.from('users').select('user_id, display_name, created_at').eq('user_id', userId),
       // Same guard rail as the score route: a cap, not pagination.
       sb.from('catches').select('taxon_id, type').eq('user_id', userId).limit(SCAN_LIMIT),
+      sb.from('sightings').select('points_awarded').eq('user_id', userId).limit(SCAN_LIMIT),
     ])
 
     if (userError) throw toDatabaseError(userError, 'users')
     if (catchError) throw toDatabaseError(catchError)
+    if (sightingError) throw toDatabaseError(sightingError, 'sightings')
 
     const catches = rows ?? []
+    const streakDays = await computeStreakDays(sb, userId, { includesToday: false })
 
     res.json({
       userId,
       displayName: found?.[0]?.display_name ?? null,
-      totalPoints: catches.reduce((sum, row) => sum + (POINTS[row.type] ?? 0), 0),
+      totalPoints: (sightingRows ?? []).reduce((sum, row) => sum + (row.points_awarded ?? 0), 0),
       catchCount: catches.length,
       uniqueSpeciesCount: new Set(catches.map((row) => row.taxon_id)).size,
+      currentStreakDays: streakDays,
+      streakMultiplier: streakMultiplier(streakDays),
       source: 'supabase',
     })
   } catch (err) {
@@ -1134,143 +1269,70 @@ router.get('/users/:userId/achievements', async (req, res, next) => {
   }
 })
 
-/**
- * A name for a leaderboard row whose user has no display_name.
- *
- * Not `defaultDisplayName()` — that mints a fresh random name and would
- * commit nothing to storage, so the same user could show one name here and
- * a different one (or none) the next time GET /api/users/:userId is called.
- * Not "Guest" either, which is what the client renders for a null
- * displayName on its own profile: that reads fine for "you", but a
- * leaderboard lists many strangers at once, and every unnamed row saying
- * "Guest" would make them indistinguishable. A truncated id is at least a
- * stable, distinct handle.
- */
-const anonymizedLeaderboardName = (userId) =>
-  userId.length > 12 ? `${userId.slice(0, 12)}…` : userId
+// Cap, not pagination — same spirit as SCAN_LIMIT, sized for a hackathon
+// leaderboard rather than a real one.
+const LEADERBOARD_LIMIT = 50
 
 /**
- * GET /api/leaderboard?place_id=&limit=
- * Ranks users by total points.
+ * GET /api/leaderboard
+ * Users ranked by total points, highest first.
  *
- * Same aggregate-everything-in-JS shape as GET /region/:placeId/score: no
- * COUNT/GROUP BY/JOIN in PostgREST, so this reads `catches` and `users`
- * (guard-railed by SCAN_LIMIT, not paginated) and folds both in JS, the same
- * way GET /api/users/:userId merges its two independent queries — there is
- * still no FK between them (migration 003), so a row in one table with no
- * match in the other is expected, not an error.
+ * Same on-the-fly aggregation as GET /region/:placeId/score and
+ * GET /users/:userId/achievements — no materialized standings table,
+ * everything derived from `sightings`/`catches` on read. Two capped scans
+ * plus a capped read of `users` for display names; fine at this scale, and
+ * it means totalPoints here always agrees with the same field on
+ * GET /api/users/:userId, because both sum the same points_awarded column.
  *
- * Score is SUM(points), not a catch count. POINTS already exists (see
- * above) and is what totalPoints on GET /api/users/:userId reads — a
- * threat_report outscoring a catch there is deliberate (spotting an
- * invasive is the harder, more valuable action), and a leaderboard that
- * ranked by raw catch count would rank around that incentive instead of
- * with it.
- *
- * `place_id` is optional and scopes the ranking (and both species counts) to
- * one region — cheap, since catches_place_id_idx already serves it. Omitted,
- * this is a global leaderboard. Either way `users` is read unfiltered: a
- * display name and an account's created_at are global facts about a person,
- * not regional ones.
- *
- * Ties: total points descending, then users.created_at ascending (earlier
- * account wins), then userId ascending as a final, fully deterministic
- * fallback. A user with points but no `users` row has no created_at to break
- * a tie with, so they sort after every tied user who has one.
+ * Only users with at least one sighting or catch appear — nothing to rank
+ * for a user who has neither.
  */
 router.get('/leaderboard', async (req, res, next) => {
   if (!requireDatabase(res)) return
 
-  const placeIdRaw = req.query.place_id
-  const hasPlaceId = placeIdRaw != null && String(placeIdRaw).trim() !== ''
-  const placeId = Number(placeIdRaw)
-
-  if (hasPlaceId && (!Number.isFinite(placeId) || placeId <= 0)) {
-    return res.status(400).json({
-      error: `place_id must be a positive number (got "${placeIdRaw}").`,
-      code: 'BAD_REQUEST',
-    })
-  }
-
-  const requestedLimit = Number(req.query.limit)
-  const limit = Math.min(
-    Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : LEADERBOARD_LIMIT,
-    LEADERBOARD_LIMIT,
-  )
-
   try {
     const sb = getSupabase()
 
-    let catchesQuery = sb.from('catches').select('user_id, taxon_id, type').limit(SCAN_LIMIT)
-    if (hasPlaceId) catchesQuery = catchesQuery.eq('place_id', placeId)
+    const [
+      { data: sightingRows, error: sightingError },
+      { data: catchRows, error: catchError },
+      { data: userRows, error: userError },
+    ] = await Promise.all([
+      sb.from('sightings').select('user_id, points_awarded').limit(SCAN_LIMIT),
+      sb.from('catches').select('user_id, taxon_id').limit(SCAN_LIMIT),
+      sb.from('users').select('user_id, display_name').limit(SCAN_LIMIT),
+    ])
 
-    const [{ data: rows, error: catchError }, { data: userRows, error: userError }] =
-      await Promise.all([
-        catchesQuery,
-        sb.from('users').select('user_id, display_name, created_at').limit(SCAN_LIMIT),
-      ])
-
+    if (sightingError) throw toDatabaseError(sightingError, 'sightings')
     if (catchError) throw toDatabaseError(catchError)
     if (userError) throw toDatabaseError(userError, 'users')
 
-    const usersById = new Map((userRows ?? []).map((u) => [u.user_id, u]))
-
-    // One pass, one Map keyed by user_id — same shape as the score route's
-    // threatsByTaxon. Species are counted the same way GET
-    // /users/:userId/achievements counts them: distinct taxon_id per type, so
-    // the same species logged in two places is one entry, not two.
-    const byUser = new Map()
-    for (const row of rows ?? []) {
-      let entry = byUser.get(row.user_id)
-      if (!entry) {
-        entry = { totalPoints: 0, nativeTaxa: new Set(), invasiveTaxa: new Set() }
-        byUser.set(row.user_id, entry)
-      }
-      entry.totalPoints += POINTS[row.type] ?? 0
-      if (row.type === 'catch') entry.nativeTaxa.add(row.taxon_id)
-      else if (row.type === 'threat_report') entry.invasiveTaxa.add(row.taxon_id)
+    const pointsByUser = new Map()
+    for (const row of sightingRows ?? []) {
+      pointsByUser.set(row.user_id, (pointsByUser.get(row.user_id) ?? 0) + (row.points_awarded ?? 0))
     }
 
-    const standings = [...byUser.entries()].map(([userId, entry]) => {
-      const user = usersById.get(userId)
-      const nativeSpeciesCount = entry.nativeTaxa.size
-      const invasiveSpeciesCount = entry.invasiveTaxa.size
+    const speciesByUser = new Map()
+    for (const row of catchRows ?? []) {
+      if (!speciesByUser.has(row.user_id)) speciesByUser.set(row.user_id, new Set())
+      speciesByUser.get(row.user_id).add(row.taxon_id)
+    }
 
-      return {
+    const nameByUser = new Map((userRows ?? []).map((u) => [u.user_id, u.display_name]))
+
+    const userIds = new Set([...pointsByUser.keys(), ...speciesByUser.keys()])
+
+    const standings = [...userIds]
+      .map((userId) => ({
         userId,
-        displayName: user?.display_name ?? anonymizedLeaderboardName(userId),
-        totalPoints: entry.totalPoints,
-        nativeSpeciesCount,
-        invasiveSpeciesCount,
-        // Native + invasive combined, matching the field name (and meaning)
-        // GET /api/users/:userId already uses — a drop-in for any caller that
-        // only wants one species number.
-        uniqueSpeciesCount: nativeSpeciesCount + invasiveSpeciesCount,
-        // Tie-break input only, stripped before the response goes out — see
-        // the sort below.
-        _createdAt: user?.created_at ?? null,
-      }
-    })
+        displayName: nameByUser.get(userId) ?? null,
+        totalPoints: pointsByUser.get(userId) ?? 0,
+        uniqueSpeciesCount: speciesByUser.get(userId)?.size ?? 0,
+      }))
+      .sort((a, b) => b.totalPoints - a.totalPoints)
+      .slice(0, LEADERBOARD_LIMIT)
 
-    standings.sort((a, b) => {
-      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints
-      const aTime = a._createdAt ? new Date(a._createdAt).getTime() : Infinity
-      const bTime = b._createdAt ? new Date(b._createdAt).getTime() : Infinity
-      if (aTime !== bTime) return aTime - bTime
-      return a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0
-    })
-
-    res.json({
-      placeId: hasPlaceId ? placeId : null,
-      placeName: hasPlaceId ? await describePlace(placeId) : null,
-      // Every user with at least one point, before the limit below cuts the
-      // board down — same distinction GET /observations/nearby draws between
-      // totalResults and what capped/results actually hand back.
-      totalResults: standings.length,
-      capped: standings.length > limit,
-      standings: standings.slice(0, limit).map(({ _createdAt, ...entry }) => entry),
-      source: 'supabase',
-    })
+    res.json(standings)
   } catch (err) {
     handleRouteError(err, 'leaderboard', res, next)
   }

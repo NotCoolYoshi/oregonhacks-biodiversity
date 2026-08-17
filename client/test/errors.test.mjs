@@ -141,5 +141,21 @@ check('an unknown taxon is distinguished too',
 check('an unrecognised submit failure still offers a retry',
   describeSubmitError(axiosError(500, {})).canRetry === true)
 
+console.log('\n-- auth failures on submit --')
+
+const unauthenticated = describeSubmitError(axiosError(401, { code: 'UNAUTHENTICATED', error: 'Sign in required.' }))
+check('an unauthenticated submit is named as such',
+  unauthenticated.title === 'Sign in to log this catch', unauthenticated.title)
+check('an unauthenticated submit does not offer a pointless retry',
+  unauthenticated.canRetry === false)
+check('an unauthenticated submit tells the user to sign in',
+  /sign in/i.test(unauthenticated.guidance), unauthenticated.guidance)
+
+const authNotConfigured = describeSubmitError(axiosError(503, { code: 'AUTH_NOT_CONFIGURED' }))
+check('a missing Clerk config is distinguished from "not signed in"',
+  authNotConfigured.title !== unauthenticated.title, authNotConfigured.title)
+check('a missing Clerk config does not blame the photo',
+  /nothing is wrong with your photo/i.test(authNotConfigured.guidance), authNotConfigured.guidance)
+
 console.log(`\n${pass} passed, ${fail} failed\n`)
 process.exit(fail === 0 ? 0 : 1)

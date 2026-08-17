@@ -603,10 +603,18 @@ export default function PhotoCapture() {
           </strong>
           <p>
             +{result.pointsAwarded} points
-            {result.isFirstCatch
+            {result.tier === 'new'
               ? ' — first time you have logged this species.'
-              : ' — already in your catalogue from elsewhere.'}
+              : result.tier === 'repeat_daily'
+                ? " — you've caught this one before; today's photo still counts."
+                : ' — already logged today, so this one is worth a token amount.'}
           </p>
+          {result.streakDays > 1 && (
+            <p className="capture-muted">
+              {result.streakDays}-day streak
+              {result.streakMultiplier > 1 ? ` — ${result.streakMultiplier}x points` : ''}
+            </p>
+          )}
         </div>
 
         {result.typeCorrected && (

@@ -27,26 +27,23 @@ function EmptySection({ title, icon, children }) {
 }
 
 export default function SocialView() {
-  // Global leaderboard — no place filter in this UI yet, though the endpoint
-  // supports one (?place_id=) for whenever a regional view is wanted.
   const [standings, setStandings] = useState([])
   const [loading, setLoading] = useState(true)
-  // Failure degrades this one section, same as CatalogueView's achievements
-  // fetch — not the whole page. Distinct from "loaded, zero rows", which is
-  // its own, non-error empty state below.
-  const [failed, setFailed] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
 
     getLeaderboard()
-      .then((data) => {
-        if (cancelled) return
-        setStandings(data.standings ?? [])
+      .then((rows) => {
+        if (!cancelled) setStandings(rows ?? [])
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return
-        setFailed(true)
+        setError(
+          err?.response?.data?.error ??
+            'Could not reach the server. If you are running this locally, check it is up on port 5001.',
+        )
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -64,15 +61,15 @@ export default function SocialView() {
       <section className="social-section">
         <h3>Leaderboard</h3>
 
-        {loading && <p className="capture-muted">Loading leaderboard…</p>}
-        {!loading && failed && (
-          <p className="capture-muted">Could not load the leaderboard right now.</p>
-        )}
-        {!loading && !failed && standings.length === 0 && (
-          <p className="capture-muted">No one has logged a catch yet — be the first.</p>
+        {loading && <p className="capture-muted">Loading standings…</p>}
+        {!loading && error && <p className="capture-note">{error}</p>}
+        {!loading && !error && standings.length === 0 && (
+          <p className="capture-note">
+            Nobody has scored yet. Catch something from the Capture tab to take first place.
+          </p>
         )}
 
-        {!loading && !failed && standings.length > 0 && (
+        {standings.length > 0 && (
           <ol className="leaderboard">
             {standings.map((entry, i) => (
               <li key={entry.userId} className={`leader-row${i === 0 ? ' is-first' : ''}`}>
@@ -81,7 +78,7 @@ export default function SocialView() {
                 </span>
                 <span className="leader-avatar" aria-hidden="true" />
                 <span className="leader-name">
-                  {entry.displayName}
+                  {entry.displayName ?? 'Explorer'}
                   <span className="leader-meta">{entry.uniqueSpeciesCount} species</span>
                 </span>
                 <span className="leader-points">{entry.totalPoints.toLocaleString()}</span>
