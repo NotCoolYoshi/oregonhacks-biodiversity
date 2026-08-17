@@ -175,15 +175,24 @@ let nextId = 1
 // aggregate catches for a user that has no row here.
 let usersTable = []
 
+// Stands in for public.sightings (migration 005) — the scoring log every
+// POST /api/catches writes to, independent of whether it also touched `table`.
+let sightingsTable = []
+
 const resetTable = () => {
   table = []
   usersTable = []
+  sightingsTable = []
   storage = new Map()
   nextId = 1
 }
 
 /** The array backing a `/rest/v1/<name>` path, or undefined if unstubbed. */
-const storeFor = (name) => (name === 'catches' ? table : name === 'users' ? usersTable : undefined)
+const storeFor = (name) =>
+  name === 'catches' ? table
+  : name === 'users' ? usersTable
+  : name === 'sightings' ? sightingsTable
+  : undefined
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -328,23 +337,28 @@ async function handlePostgrest(url, init) {
     const payload = JSON.parse(init.body)
     const rows = (Array.isArray(payload) ? payload : [payload]).map((row) => ({
       // public.users is keyed by user_id and has no surrogate id column.
-      ...(tableName === 'catches' ? { id: `row_${nextId++}` } : {}),
+      ...(tableName === 'catches' || tableName === 'sightings' ? { id: `row_${nextId++}` } : {}),
       created_at: new Date().toISOString(),
       ...row,
     }))
 
     // The unique index from migration 002 on catches, and the primary key on
     // users — both enforced here so the race paths are reachable in a test.
+    // `sightings` (migration 005) has no unique constraint at all — repeats
+    // of the same (user, taxon, place) on the same day are exactly what it is
+    // for — so it falls through to `clash: null` and is never rejected here.
     for (const row of rows) {
       const clash =
         tableName === 'users'
           ? store.find((existing) => existing.user_id === row.user_id)
-          : store.find(
-              (existing) =>
-                existing.user_id === row.user_id &&
-                Number(existing.taxon_id) === Number(row.taxon_id) &&
-                Number(existing.place_id) === Number(row.place_id),
-            )
+          : tableName === 'catches'
+            ? store.find(
+                (existing) =>
+                  existing.user_id === row.user_id &&
+                  Number(existing.taxon_id) === Number(row.taxon_id) &&
+                  Number(existing.place_id) === Number(row.place_id),
+              )
+            : null
       if (clash) {
         const constraint =
           tableName === 'users' ? 'users_pkey' : 'catches_user_taxon_place_uniq'
@@ -583,8 +597,8 @@ check('invasive claimed as catch is stored as threat_report',
   r.status === 201 && r.body.type === 'threat_report', `${r.status} ${r.body.type}`)
 check('override is reported via typeCorrected', r.body.typeCorrected === true)
 check('override reports what was claimed', r.body.claimedType === 'catch', r.body.claimedType)
-check('points follow the server type, not the claim', r.body.pointsAwarded === 25,
-  r.body.pointsAwarded)
+check('points follow the server type, not the claim (new threat_report)',
+  r.body.pointsAwarded === 50, r.body.pointsAwarded)
 check('establishmentMeans surfaced', r.body.establishmentMeans === 'introduced',
   r.body.establishmentMeans)
 check('persisted row carries the corrected type', table[0].type === 'threat_report',
@@ -594,7 +608,8 @@ check('persisted row carries the corrected type', table[0].type === 'threat_repo
 r = await post({ ...CATCH, taxonId: 126887, type: 'threat_report' })
 check('native claimed as threat_report is stored as catch',
   r.status === 201 && r.body.type === 'catch', `${r.status} ${r.body.type}`)
-check('points drop to the catch value', r.body.pointsAwarded === 10, r.body.pointsAwarded)
+check('points drop to the catch value (new catch)', r.body.pointsAwarded === 20,
+  r.body.pointsAwarded)
 check('typeCorrected set on this direction too', r.body.typeCorrected === true)
 
 r = await post({ ...CATCH, taxonId: 48472, type: 'catch' })
@@ -718,16 +733,72 @@ check('...and familySequence is null, not 0 or omitted',
 r = await post({ ...CATCH, taxonId: 63603, family: '  Fabaceae  ' })
 check('family is trimmed before storage', r.body.family === 'Fabaceae', r.body.family)
 
-console.log('\n-- duplicate suppression --')
+console.log('\n-- repeats: no more 409, tiered points instead --')
 resetTable()
 
-await post({ ...CATCH, taxonId: 61317 })
-const before = table.length
 r = await post({ ...CATCH, taxonId: 61317 })
-check('same user + taxon + place is rejected', r.status === 409, r.status)
-check('rejection is coded DUPLICATE_CATCH', r.body.code === 'DUPLICATE_CATCH', r.body.code)
-check('rejection points at the existing row', Boolean(r.body.existingCatchId))
-check('no second row was written', table.length === before, `${table.length} vs ${before}`)
+check('first sighting of the day is tier "new"', r.body.tier === 'new', r.body.tier)
+check('...worth the new-species threat_report points', r.body.pointsAwarded === 50,
+  r.body.pointsAwarded)
+check('...and creates a catalogue entry', r.body.newCatalogueEntry === true,
+  r.body.newCatalogueEntry)
+const before = table.length
+
+r = await post({ ...CATCH, taxonId: 61317 })
+check('an exact repeat succeeds instead of 409ing', r.status === 201, r.status)
+check('...tiered as repeat_extra (second sighting of this species today)',
+  r.body.tier === 'repeat_extra', r.body.tier)
+check('...worth the token threat_report amount', r.body.pointsAwarded === 3, r.body.pointsAwarded)
+check('...and does not create a new catalogue row',
+  r.body.newCatalogueEntry === false, r.body.newCatalogueEntry)
+check('...but reports the original catalogue id', r.body.id === table[0].id, r.body.id)
+check('no second catches row was written', table.length === before, `${table.length} vs ${before}`)
+check('but a sighting was logged for it', sightingsTable.length === 2, sightingsTable.length)
+check('the sighting references the catalogue row',
+  sightingsTable[1].catch_id === table[0].id, sightingsTable[1].catch_id)
+
+console.log('\n-- repeats: a later day resets to repeat_daily --')
+resetTable()
+
+// Simulate this species already being caught on a previous day, with no
+// activity yet today.
+table.push({
+  id: 'row_seed', user_id: 'usr_1', taxon_id: 126887, place_id: 10, type: 'catch',
+  common_name: 'Oregon grape', scientific_name: 'Berberis aquifolium',
+  created_at: '2026-08-01T00:00:00.000Z',
+})
+sightingsTable.push({
+  id: 'sight_seed', user_id: 'usr_1', taxon_id: 126887, catch_id: 'row_seed', type: 'catch',
+  tier: 'new', points_awarded: 20, created_at: '2026-08-01T00:00:00.000Z',
+})
+
+r = await post({ ...CATCH, taxonId: 126887 })
+check('a repeat on a later day is tier repeat_daily', r.body.tier === 'repeat_daily', r.body.tier)
+check('...worth the daily-repeat catch points (no streak carried over the gap)',
+  r.body.pointsAwarded === 10, r.body.pointsAwarded)
+check('...and still no new catalogue row', r.body.newCatalogueEntry === false,
+  r.body.newCatalogueEntry)
+check('no second catches row was written', table.length === 1, table.length)
+
+console.log('\n-- streak multiplier --')
+resetTable()
+
+// A synthetic 12-day streak ending yesterday, one sighting per day.
+for (let d = 12; d >= 1; d--) {
+  const day = new Date()
+  day.setUTCDate(day.getUTCDate() - d)
+  sightingsTable.push({
+    id: `streak_${d}`, user_id: 'usr_streak', taxon_id: 900000 + d, catch_id: null,
+    type: 'catch', tier: 'new', points_awarded: 20, created_at: day.toISOString(),
+  })
+}
+
+r = await post({ ...CATCH, userId: 'usr_streak', taxonId: 126887 })
+check('today extends the streak to 13 consecutive days', r.body.streakDays === 13, r.body.streakDays)
+check('floor(13/5) * 0.1 -> a 1.2x multiplier', r.body.streakMultiplier === 1.2,
+  r.body.streakMultiplier)
+check('applied to the new-catch base (20 * 1.2 = 24)', r.body.pointsAwarded === 24,
+  r.body.pointsAwarded)
 
 console.log('\n-- request validation --')
 r = await post({ taxonId: 126887 })
@@ -755,6 +826,21 @@ const seed = (user_id, taxon_id, type, place_id = 10) =>
     common_name: TAXA[taxon_id].preferred_common_name,
     scientific_name: TAXA[taxon_id].name,
     created_at: new Date().toISOString(),
+  })
+
+// Seeds `sightings` directly, bypassing POST /api/catches's tier/streak
+// math — for tests that only care what GET /api/users/:userId and
+// GET /api/leaderboard do with points_awarded once it already exists.
+const seedSighting = (user_id, taxon_id, type, points_awarded, at = new Date().toISOString()) =>
+  sightingsTable.push({
+    id: `sight_${nextId++}`,
+    user_id,
+    taxon_id,
+    catch_id: null,
+    type,
+    tier: 'new',
+    points_awarded,
+    created_at: at,
   })
 
 seed('usr_1', 126887, 'catch')
@@ -1096,6 +1182,9 @@ check('displayName is null, not invented', g.body.displayName === null, g.body.d
 check('totalPoints is 0', g.body.totalPoints === 0, g.body.totalPoints)
 check('catchCount is 0', g.body.catchCount === 0, g.body.catchCount)
 check('uniqueSpeciesCount is 0', g.body.uniqueSpeciesCount === 0, g.body.uniqueSpeciesCount)
+check('currentStreakDays is 0 with no sightings ever', g.body.currentStreakDays === 0,
+  g.body.currentStreakDays)
+check('streakMultiplier is 1 at zero streak', g.body.streakMultiplier === 1, g.body.streakMultiplier)
 check('reading does not create a row', usersTable.length === 0, usersTable.length)
 
 console.log('\n-- get a user, aggregated over their catches --')
@@ -1103,25 +1192,35 @@ resetTable()
 
 await postUser({ userId: 'usr_p', displayName: 'Point Getter' })
 
-// 10 + 10 + 25 + 10 = 55 points across 4 rows and 3 distinct taxa. The fourth
-// row is a species already caught, in another place: a real observation, worth
-// points, but not a new catalogue entry.
+// catchCount/uniqueSpeciesCount still come from `catches`: 4 rows, 3 distinct
+// taxa. The fourth row is a species already caught, in another place: a real
+// observation, worth points, but not a new catalogue entry.
 seed('usr_p', 126887, 'catch')
 seed('usr_p', 48472, 'catch')
 seed('usr_p', 61317, 'threat_report')
 seed('usr_p', 126887, 'catch', 962)
 seed('usr_other', 58732, 'threat_report') // must not leak into usr_p's totals
 
+// totalPoints now sums `sightings.points_awarded`, not a flat rate off
+// `catches` — 20 + 20 + 50 + 1 = 91. The last one stands in for the repeat
+// sighting that produced the fourth `catches` row above (a token amount,
+// same as a same-day repeat_extra would score).
+seedSighting('usr_p', 126887, 'catch', 20)
+seedSighting('usr_p', 48472, 'catch', 20)
+seedSighting('usr_p', 61317, 'threat_report', 50)
+seedSighting('usr_p', 126887, 'catch', 1)
+seedSighting('usr_other', 58732, 'threat_report', 50) // must not leak into usr_p's totals
+
 g = await getUser('usr_p')
 check('displayName comes from the users row', g.body.displayName === 'Point Getter',
   g.body.displayName)
-check('totalPoints weights threat reports higher', g.body.totalPoints === 55, g.body.totalPoints)
+check('totalPoints sums this user\'s sightings', g.body.totalPoints === 91, g.body.totalPoints)
 check('catchCount counts every row', g.body.catchCount === 4, g.body.catchCount)
 check('uniqueSpeciesCount counts distinct taxa', g.body.uniqueSpeciesCount === 3,
   g.body.uniqueSpeciesCount)
 
 g = await getUser('usr_other')
-check('aggregates are per user', g.body.totalPoints === 25, g.body.totalPoints)
+check('aggregates are per user', g.body.totalPoints === 50, g.body.totalPoints)
 check('...and one row is one catch', g.body.catchCount === 1, g.body.catchCount)
 check('...with no name until they upsert', g.body.displayName === null, g.body.displayName)
 
@@ -1131,9 +1230,11 @@ console.log('\n-- catches with no users row still aggregate --')
 resetTable()
 seed('usr_legacy', 126887, 'catch')
 seed('usr_legacy', 61317, 'threat_report')
+seedSighting('usr_legacy', 126887, 'catch', 20)
+seedSighting('usr_legacy', 61317, 'threat_report', 50)
 
 g = await getUser('usr_legacy')
-check('points are counted without a users row', g.body.totalPoints === 35, g.body.totalPoints)
+check('points are counted without a users row', g.body.totalPoints === 70, g.body.totalPoints)
 check('counts are too', g.body.catchCount === 2 && g.body.uniqueSpeciesCount === 2,
   `${g.body.catchCount} ${g.body.uniqueSpeciesCount}`)
 check('displayName stays null', g.body.displayName === null, g.body.displayName)
@@ -1145,6 +1246,52 @@ check('a named user with no catches reports zeros',
   g.body.totalPoints === 0 && g.body.catchCount === 0 && g.body.uniqueSpeciesCount === 0,
   JSON.stringify(g.body))
 check('...but still reports their name', g.body.displayName === 'Just Arrived', g.body.displayName)
+
+// ---------------------------------------------------------------------------
+// GET /api/leaderboard
+// ---------------------------------------------------------------------------
+
+const getLeaderboard = async () => {
+  const res = await realFetch(`${base}/api/leaderboard`)
+  return { status: res.status, body: await res.json() }
+}
+
+console.log('\n-- leaderboard, empty --')
+resetTable()
+
+let lb = await getLeaderboard()
+check('empty leaderboard -> 200', lb.status === 200, lb.status)
+check('...with an empty array', Array.isArray(lb.body) && lb.body.length === 0,
+  JSON.stringify(lb.body))
+
+console.log('\n-- leaderboard, ranked by points --')
+resetTable()
+
+await postUser({ userId: 'usr_a', displayName: 'Fern Gully' })
+await postUser({ userId: 'usr_b', displayName: 'Mossy Log' })
+
+seed('usr_a', 126887, 'catch')
+seed('usr_a', 48472, 'catch')
+seed('usr_b', 61317, 'threat_report')
+seedSighting('usr_a', 126887, 'catch', 20)
+seedSighting('usr_a', 48472, 'catch', 20)
+seedSighting('usr_b', 61317, 'threat_report', 50)
+
+lb = await getLeaderboard()
+check('the higher scorer ranks first', lb.body[0].userId === 'usr_b', JSON.stringify(lb.body))
+check('...with the summed points', lb.body[0].totalPoints === 50, lb.body[0].totalPoints)
+check('the second scorer follows', lb.body[1].userId === 'usr_a', JSON.stringify(lb.body))
+check('...with points from both sightings', lb.body[1].totalPoints === 40, lb.body[1].totalPoints)
+check('uniqueSpeciesCount reflects distinct taxa', lb.body[1].uniqueSpeciesCount === 2,
+  lb.body[1].uniqueSpeciesCount)
+check('displayName resolved from the users table', lb.body[0].displayName === 'Mossy Log',
+  lb.body[0].displayName)
+
+console.log('\n-- leaderboard: a user with no sightings or catches does not appear --')
+await postUser({ userId: 'usr_idle', displayName: 'Idle Explorer' })
+lb = await getLeaderboard()
+check('idle user is absent', !lb.body.some((row) => row.userId === 'usr_idle'),
+  JSON.stringify(lb.body))
 
 // ---------------------------------------------------------------------------
 // GET /api/users/:userId/achievements — native and invasive badge state.

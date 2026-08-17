@@ -147,6 +147,7 @@ export const getUserAchievements = (userId) =>
   api.get(`/api/users/${encodeURIComponent(userId)}/achievements`).then((r) => r.data)
 
 /**
+<<<<<<< Updated upstream
  * GET /api/leaderboard?place_id= — users ranked by total points.
  *
  * Resolves to { placeId, placeName, totalResults, capped, standings }, where
@@ -159,3 +160,12 @@ export const getLeaderboard = (placeId) =>
   api
     .get('/api/leaderboard', { params: placeId ? { place_id: placeId } : {} })
     .then((r) => r.data)
+=======
+ * GET /api/leaderboard — users ranked by total points, highest first.
+ *
+ * Resolves to `{ userId, displayName, totalPoints, uniqueSpeciesCount }[]`.
+ * Computed server-side on every call from the same `sightings` rows
+ * GET /api/users/:userId sums, so the two never disagree.
+ */
+export const getLeaderboard = () => api.get('/api/leaderboard').then((r) => r.data)
+>>>>>>> Stashed changes

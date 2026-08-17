@@ -146,13 +146,6 @@ export function describeSubmitError(err) {
   const detail = typeof data.error === 'string' ? data.error : null
 
   switch (data.code) {
-    case 'DUPLICATE_CATCH':
-      return {
-        code: data.code,
-        title: 'Already in your catalogue',
-        guidance: detail ?? 'You have already logged this species here.',
-        canRetry: false,
-      }
     case 'DB_NOT_CONFIGURED':
       return {
         code: data.code,

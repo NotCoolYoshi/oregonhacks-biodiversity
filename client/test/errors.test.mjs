@@ -124,14 +124,6 @@ check('a flower photo is not told to photograph the flower',
 
 console.log('\n-- catch submission failures --')
 
-const duplicate = describeSubmitError(
-  axiosError(409, { code: 'DUPLICATE_CATCH', error: 'You have already logged Rubus armeniacus in Oregon.' }),
-)
-check('a duplicate is named as such', duplicate.title === 'Already in your catalogue', duplicate.title)
-check('a duplicate does not offer a pointless retry', duplicate.canRetry === false)
-check("a duplicate shows the server's explanation",
-  /already logged/i.test(duplicate.guidance), duplicate.guidance)
-
 check('an unconfigured database is distinguished from a rejected catch',
   describeSubmitError(axiosError(503, { code: 'DB_NOT_CONFIGURED' })).title !==
     describeSubmitError(axiosError(500, {})).title)

@@ -27,6 +27,7 @@ function EmptySection({ title, icon, children }) {
 }
 
 export default function SocialView() {
+<<<<<<< Updated upstream
   // Global leaderboard — no place filter in this UI yet, though the endpoint
   // supports one (?place_id=) for whenever a regional view is wanted.
   const [standings, setStandings] = useState([])
@@ -35,11 +36,17 @@ export default function SocialView() {
   // fetch — not the whole page. Distinct from "loaded, zero rows", which is
   // its own, non-error empty state below.
   const [failed, setFailed] = useState(false)
+=======
+  const [standings, setStandings] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+>>>>>>> Stashed changes
 
   useEffect(() => {
     let cancelled = false
 
     getLeaderboard()
+<<<<<<< Updated upstream
       .then((data) => {
         if (cancelled) return
         setStandings(data.standings ?? [])
@@ -47,6 +54,17 @@ export default function SocialView() {
       .catch(() => {
         if (cancelled) return
         setFailed(true)
+=======
+      .then((rows) => {
+        if (!cancelled) setStandings(rows ?? [])
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(
+          err?.response?.data?.error ??
+            'Could not reach the server. If you are running this locally, check it is up on port 5001.',
+        )
+>>>>>>> Stashed changes
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -64,6 +82,7 @@ export default function SocialView() {
       <section className="social-section">
         <h3>Leaderboard</h3>
 
+<<<<<<< Updated upstream
         {loading && <p className="capture-muted">Loading leaderboard…</p>}
         {!loading && failed && (
           <p className="capture-muted">Could not load the leaderboard right now.</p>
@@ -73,6 +92,17 @@ export default function SocialView() {
         )}
 
         {!loading && !failed && standings.length > 0 && (
+=======
+        {loading && <p className="capture-muted">Loading standings…</p>}
+        {!loading && error && <p className="capture-note">{error}</p>}
+        {!loading && !error && standings.length === 0 && (
+          <p className="capture-note">
+            Nobody has scored yet. Catch something from the Capture tab to take first place.
+          </p>
+        )}
+
+        {standings.length > 0 && (
+>>>>>>> Stashed changes
           <ol className="leaderboard">
             {standings.map((entry, i) => (
               <li key={entry.userId} className={`leader-row${i === 0 ? ' is-first' : ''}`}>
@@ -81,7 +111,11 @@ export default function SocialView() {
                 </span>
                 <span className="leader-avatar" aria-hidden="true" />
                 <span className="leader-name">
+<<<<<<< Updated upstream
                   {entry.displayName}
+=======
+                  {entry.displayName ?? 'Explorer'}
+>>>>>>> Stashed changes
                   <span className="leader-meta">{entry.uniqueSpeciesCount} species</span>
                 </span>
                 <span className="leader-points">{entry.totalPoints.toLocaleString()}</span>
