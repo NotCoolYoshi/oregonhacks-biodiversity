@@ -1,4 +1,4 @@
-export default function GalleryTest() {
+export default function Gallery() {
   return (
     <div style={{ padding: '2rem', textAlign: 'center' }}>
       <h2>Gallery Test View</h2>
