@@ -993,8 +993,14 @@ router.get('/catches', async (req, res, next) => {
 /**
  * GET /api/supabase/all
  * Fetches all data stored in Supabase tables (`catches` and `users`) along with counts and metadata.
+ *
+ * Requires auth (requireClerkUser) — this is a bulk, unfiltered dump across every
+ * user, so it can't be left open the way a scoped read like GET /catches is.
+ * user_id stays out of the catches select for the same reason GET /catches
+ * withholds it: it is the one column here that identifies a person, and no
+ * caller needs it back.
  */
-router.get('/supabase/all', async (req, res, next) => {
+router.get('/supabase/all', requireClerkUser, async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   try {
@@ -1004,7 +1010,7 @@ router.get('/supabase/all', async (req, res, next) => {
       await Promise.all([
         sb.from('catches')
           .select(
-            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, rarity, confidence, created_at',
+            'id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, rarity, confidence, created_at',
           )
           .order('created_at', { ascending: false })
           .limit(SCAN_LIMIT),
