@@ -79,6 +79,13 @@ export default function PlantCard({ plant = EMPTY_PLANT }) {
       <div className="bg" aria-hidden="true" />
 
       <div className="plant-card__content">
+        {currentPlant.photoUrl && (
+          <img
+            className="plant-card__photo"
+            src={currentPlant.photoUrl}
+            alt={currentPlant.name ?? 'Plant photo'}
+          />
+        )}
         <div className="plant-card__bottom">
           <div className="plant-card__left">
             <div className="plant-card__name">{currentPlant.name ?? 'Unknown'}</div>
