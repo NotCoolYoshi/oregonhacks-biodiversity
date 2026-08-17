@@ -231,6 +231,14 @@ function mapConservationStatus(taxon) {
     status: status.status.toUpperCase(),
     statusName: status.status_name ?? null,
     authority: status.authority ?? null,
+    // iNaturalist's own cross-authority ordinal: 0/10/20/30/40/50/60/70,
+    // the same scale whether the source assessment is IUCN, a state agency,
+    // or CNPS — confirmed against real assessments (IUCN 'vu' -> 30, 'en' ->
+    // 40, USFWS/Oregon Dept. of Agriculture 'E' -> 40, IUCN 'ew' -> 60; see
+    // docs/rarity-scoring-plan-20260817.md §2). This is what
+    // services/rarity.js normalizes to 0-1, rather than hand-mapping every
+    // authority's own status text.
+    iucn: status.iucn ?? null,
   }
 }
 
@@ -450,6 +458,14 @@ export async function getTaxonStatus(taxonId, placeId) {
       establishmentMeans,
       ...classify(establishmentMeans),
       conservationStatus: mapConservationStatus(taxon),
+      // GLOBAL, not place-scoped — confirmed empirically, not assumed: a
+      // /taxa/:id call's observations_count is byte-identical with and
+      // without place_id (see docs/rarity-scoring-plan-20260817.md §2).
+      // place_id only affects establishment_means/conservation_status above.
+      // For a place-scoped count, see getPlaceScopedObservationCount() below
+      // — confusingly, getNearbySpecies() further down this file returns a
+      // same-named `observationCount` field that IS place-scoped, from a
+      // different endpoint. Don't conflate the two.
       observationCount: taxon.observations_count ?? 0,
       defaultPhotoUrl: photoUrl(taxon),
       wikipediaUrl: taxon.wikipedia_url ?? null,
@@ -489,6 +505,44 @@ export async function getPhenology(taxonId, placeId) {
   }
 
   return histogram
+}
+
+/**
+ * How many verifiable observations of this taxon exist IN this place —
+ * unlike getTaxonStatus().observationCount (global regardless of place_id),
+ * this is the number rarity scoring actually needs. Confirmed against real
+ * data: e.g. saguaro is 86,470 globally but 83,804 scoped to Arizona; a
+ * Mexican-endemic cactus logged against Arizona comes back 0 here, not some
+ * fraction of its (nonzero) global count. See
+ * docs/rarity-scoring-plan-20260817.md §2.
+ *
+ * Same endpoint getNearbySpecies() already uses for its per-row counts
+ * (`/observations/species_counts`), called here for one taxon instead of a
+ * place-wide page. `verifiable: 'true'` matches that call's convention —
+ * casual/unconfirmed observations don't count towards "how common is this,
+ * really."
+ *
+ * @param {number} taxonId
+ * @param {number} placeId
+ * @returns {Promise<number>}
+ */
+export async function getPlaceScopedObservationCount(taxonId, placeId) {
+  const id = Number(taxonId)
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new INaturalistError(`taxonId must be a positive number (got "${taxonId}").`, {
+      status: 400,
+      code: 'BAD_REQUEST',
+    })
+  }
+
+  return cached(`obscount:${id}:${placeId}`, async () => {
+    const payload = await get('/observations/species_counts', {
+      place_id: placeId,
+      taxon_id: id,
+      verifiable: 'true',
+    })
+    return payload.results?.[0]?.count ?? 0
+  })
 }
 
 /**

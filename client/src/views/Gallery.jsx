@@ -12,7 +12,10 @@ function toPlantCardProps(catchRow) {
     name: catchRow.common_name || catchRow.scientific_name || 'Unknown',
     uniqueId: catchRow.id ?? catchRow.taxon_id ?? '—',
     photoUrl: catchRow.photo_url ?? null,
-    rarity: catchRow.rarity ?? 'N',
+    // PlantCard derives its N/R/SR/SSR/UR tier from this itself — a row
+    // logged before migration 007 (or not yet backfilled) has no score and
+    // renders as the default tier.
+    rarityScore: catchRow.rarity_score ?? null,
   }
 }
 

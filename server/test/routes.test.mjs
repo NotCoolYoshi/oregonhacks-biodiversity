@@ -57,6 +57,7 @@ const realFetch = globalThis.fetch
 
 const express = (await import('express')).default
 const { default: router } = await import('../src/routes/api.js')
+const { computeRarity } = await import('../src/services/rarity.js')
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -78,6 +79,10 @@ const TAXA = {
     rank: 'species',
     observations_count: 68775,
     means: { 10: 'native' },
+    // Common in its place, per real numbers checked in
+    // docs/rarity-scoring-plan-20260817.md §2 — well past the 10,000
+    // observations cap, so this exercises the "definitely common" floor.
+    placeCounts: { 10: 68000 },
   },
   61317: {
     id: 61317,
@@ -86,6 +91,7 @@ const TAXA = {
     rank: 'species',
     observations_count: 40000,
     means: { 10: 'introduced' },
+    placeCounts: { 10: 2866 }, // real number, see the plan doc's §2 table
   },
   48472: {
     id: 48472,
@@ -94,6 +100,7 @@ const TAXA = {
     rank: 'species',
     observations_count: 11078,
     means: { 10: 'native' },
+    placeCounts: { 10: 11079 }, // real number, see the plan doc's §2 table
   },
   // No establishment means anywhere: iNaturalist has no checklist entry for
   // this taxon at all. classify() files it as a 'catch' (a species we cannot
@@ -116,6 +123,7 @@ const TAXA = {
     // Invasive in Oregon, native in Arizona's neighbour set it is not — but the
     // shape that matters here is that one taxon carries two different verdicts.
     means: { 10: 'invasive' },
+    placeCounts: { 10: 5543 }, // real number, see the plan doc's §2 table
   },
   // The regression this whole change is about. A blue palo verde photographed
   // in Phoenix is native there and unlisted in Oregon; checked against the old
@@ -127,6 +135,11 @@ const TAXA = {
     rank: 'species',
     observations_count: 8400,
     means: { 40: 'native' },
+    // No entry for place 40 on purpose — this taxon exercises the "iNaturalist
+    // knows this species but has zero verifiable records right here" case
+    // (a real one — see the Coryphantha cornifera example in the plan doc),
+    // distinct from "taxon id unknown to species_counts at all".
+    placeCounts: {},
   },
   // Introduced to Arizona and native to Oregon, so it cannot be classified
   // correctly in both without reading the place the photo was taken in.
@@ -137,6 +150,27 @@ const TAXA = {
     rank: 'species',
     observations_count: 12,
     means: { 10: 'native', 40: 'introduced' },
+    placeCounts: { 10: 5, 40: 3 },
+  },
+  // Carries a real-shaped conservation_status, unlike every taxon above (none
+  // of which have one — the confirmed majority case, per the plan doc's live
+  // survey). Exercises the 50/50 blended score path, not just observations
+  // alone. iucn: 40 matches real 'endangered' assessments pulled from several
+  // different authorities (IUCN, USFWS, a state agency) — see the plan doc §2.
+  77001: {
+    id: 77001,
+    name: 'Astragalus testicus',
+    preferred_common_name: 'Test milkvetch',
+    rank: 'species',
+    observations_count: 16,
+    means: { 10: 'native' },
+    placeCounts: { 10: 16 },
+    conservation_status: {
+      status: 'en',
+      status_name: 'endangered',
+      authority: 'U.S. Fish & Wildlife Service',
+      iucn: 40,
+    },
   },
 }
 
@@ -248,6 +282,12 @@ const json = (body, status = 200) =>
 // cannot be reached.
 let failTaxaLookup = false
 
+// Flipped on to exercise POST /catches's degradation path when the
+// place-scoped observation count lookup (rarity scoring) fails — the row
+// must still be recorded, just without a rarity score, not 500 the whole
+// capture over a secondary lookup.
+let failObservationCounts = false
+
 function handleINaturalist(url) {
   // /v1/places/nearby?nelat=&nelng=&swlat=&swlng=  — coordinates to a place.
   if (url.pathname === '/v1/places/nearby') {
@@ -280,6 +320,25 @@ function handleINaturalist(url) {
     const q = (url.searchParams.get('q') ?? '').toLowerCase()
     const id = NAME_TO_ID[q]
     return json({ total_results: id ? 1 : 0, results: id ? [taxonForPlace(TAXA[id])] : [] })
+  }
+
+  // /v1/observations/species_counts?place_id=&taxon_id=&verifiable=
+  // Backs getPlaceScopedObservationCount() (services/inaturalist.js), which
+  // rarity scoring calls from POST /catches. `placeCounts`, keyed by place
+  // id, stands in for the real place-scoping this endpoint does — a taxon
+  // with no entry for the requested place answers 0 (a real, valid answer:
+  // "no verifiable local record", not an error — see e.g. the Coryphantha
+  // cornifera-in-Arizona case in docs/rarity-scoring-plan-20260817.md §2),
+  // distinct from an unknown taxon id below, which is what exercises the
+  // route's must-not-fail-the-whole-request path instead.
+  if (url.pathname === '/v1/observations/species_counts') {
+    if (failObservationCounts) return json({ error: 'upstream is down' }, 500)
+    const taxonId = Number(url.searchParams.get('taxon_id'))
+    const placeId = Number(url.searchParams.get('place_id'))
+    const taxon = TAXA[taxonId]
+    if (!taxon) return json({ total_results: 0, results: [] })
+    const count = taxon.placeCounts?.[placeId] ?? 0
+    return json({ total_results: 1, results: [{ count, taxon: { id: taxonId } }] })
   }
 
   return json({ error: `unstubbed iNaturalist path ${url.pathname}` }, 404)
@@ -1572,6 +1631,64 @@ console.log('\n-- achievements: validation --')
 a = await getAchievements('  ')
 check('whitespace-only userId -> 400', a.status === 400, a.status)
 check('...coded BAD_REQUEST', a.body.code === 'BAD_REQUEST', a.body.code)
+
+console.log('\n-- rarity: computed once at catch time, not random --')
+resetTable()
+
+// Common in its place (see the placeCounts fixture above) -> low score,
+// Common band.
+r = await post({ ...CATCH, taxonId: 126887 })
+const commonExpected = computeRarity({ observationsCount: 68000, conservationIucn: null })
+check('a common species scores near 0', r.body.rarityScore === commonExpected.score,
+  r.body.rarityScore)
+check('...and bands as Common', r.body.rarityBand === 'Common', r.body.rarityBand)
+check('...gacha tier N', r.body.rarityGachaTier === 'N', r.body.rarityGachaTier)
+check('the stored row carries the raw observation count',
+  table[0].rarity_observations_count === 68000, table[0].rarity_observations_count)
+check('...and no conservation status (none on this fixture)',
+  table[0].rarity_conservation_status === null, table[0].rarity_conservation_status)
+
+// Almost no local record (placeCounts[40] = 3) -> high score, rare band.
+r = await post({ userId: 'usr_rare', taxonId: 99001, location: IN_ARIZONA })
+const rareExpected = computeRarity({ observationsCount: 3, conservationIucn: null })
+check('a species with almost no local record scores high',
+  r.body.rarityScore === rareExpected.score, r.body.rarityScore)
+check('...and bands as Very Rare', r.body.rarityBand === 'Very Rare', r.body.rarityBand)
+
+// A real conservation assessment blends in 50/50, not just observations.
+r = await post({ ...CATCH, taxonId: 77001 })
+const blendedExpected = computeRarity({ observationsCount: 16, conservationIucn: 40 })
+const obsOnlyExpected = computeRarity({ observationsCount: 16, conservationIucn: null })
+check('conservation status is stored raw',
+  table.at(-1).rarity_conservation_status === 'EN', table.at(-1).rarity_conservation_status)
+check('...with its iucn ordinal',
+  table.at(-1).rarity_conservation_iucn === 40, table.at(-1).rarity_conservation_iucn)
+check('the blended score differs from observations alone',
+  blendedExpected.score !== obsOnlyExpected.score, blendedExpected.score)
+check('...and matches what was actually stored',
+  r.body.rarityScore === blendedExpected.score, r.body.rarityScore)
+
+// A repeat catch (same user, taxon, place) creates no new catches row — the
+// score computed the first time is what the response should still report,
+// not a fresh (and wasted) computation.
+const first = await post({ userId: 'usr_repeat', taxonId: 126887, placeId: 10, location: IN_OREGON })
+const repeat = await post({ userId: 'usr_repeat', taxonId: 126887, placeId: 10, location: IN_OREGON })
+check('a repeat catch is not a new catalogue entry', repeat.body.newCatalogueEntry === false)
+check('...but still reports the original rarity score',
+  repeat.body.rarityScore === first.body.rarityScore, repeat.body.rarityScore)
+
+// The place-scoped observation lookup failing must not fail the whole
+// capture — rarity is an enhancement on top of the catch, not a
+// precondition for logging one.
+failObservationCounts = true
+r = await post({ userId: 'usr_degraded', taxonId: 126887, placeId: 40, location: IN_ARIZONA })
+check('capture still succeeds when the observation-count lookup fails',
+  r.status === 201, r.status)
+check('...with no fabricated rarity score', r.body.rarityScore === null, r.body.rarityScore)
+check('...and the stored row agrees (nulls, not a wrong number)',
+  table.at(-1).rarity_score === null && table.at(-1).rarity_observations_count === null,
+  JSON.stringify({ score: table.at(-1).rarity_score, count: table.at(-1).rarity_observations_count }))
+failObservationCounts = false
 
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()

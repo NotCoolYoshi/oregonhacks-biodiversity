@@ -12,14 +12,13 @@ import {
   isNativeMeans,
   resolvePlaceFromCoords,
   getPlaceName,
+  getPlaceScopedObservationCount,
   INaturalistError,
 } from '../services/inaturalist.js'
+import { computeRarity, gachaTierFor } from '../services/rarity.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
 import { uploadCatchPhoto, PhotoStorageError } from '../services/photoStorage.js'
 import { requireClerkUser } from '../middleware/clerkAuth.js'
-
-// Rarity options for catches
-const VALID_RARITIES = ['N', 'R', 'SR', 'SSR', 'UR']
 
 const router = Router()
 
@@ -755,7 +754,7 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
     // observation worth recording, just not a new catalogue entry.
     const { data: existing, error: existingError } = await sb
       .from('catches')
-      .select('id, place_id')
+      .select('id, place_id, rarity_score, rarity_band')
       .eq('user_id', userId)
       .eq('taxon_id', taxonId)
 
@@ -790,6 +789,37 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
     // touches no `catches` row; it only logs a sighting, below.
     let row = null
     if (!priorHere) {
+      // Place-scoped observation count — the one input getTaxonStatus() above
+      // doesn't already carry (its observationCount is global; see
+      // inaturalist.js). Only fetched here, not for a repeat catch: rarity is
+      // a catalogue-entry fact ("how common is this species here"), computed
+      // and stored once, never re-fetched at view time. See
+      // docs/rarity-scoring-plan-20260817.md §3/§5.
+      //
+      // A failure here must not fail the whole capture: rarity is an
+      // enhancement on top of a real catch, not a precondition for logging
+      // one, and "iNaturalist has no observations endpoint data for this
+      // taxon/place combination" is a real, non-exotic upstream response
+      // (rate limiting, a transient 5xx, a taxon id with no observation
+      // records at all). Falling back to nulls records the catch honestly as
+      // "not yet scored" — the same state a pre-migration-007 row is in —
+      // rather than inventing a wrong score (e.g. treating a lookup failure
+      // as "0 observations" would wrongly score it maximally rare).
+      let rarityObservationsCount = null
+      let rarity = null
+      try {
+        rarityObservationsCount = await getPlaceScopedObservationCount(taxonId, placeId)
+        rarity = computeRarity({
+          observationsCount: rarityObservationsCount,
+          conservationIucn: status.conservationStatus?.iucn ?? null,
+        })
+      } catch (err) {
+        rarityObservationsCount = null
+        console.warn(
+          `[catches] rarity scoring skipped for taxon ${taxonId} in place ${placeId}: ${err.message}`,
+        )
+      }
+
       const { data: inserted, error: insertError } = await sb
         .from('catches')
         .insert({
@@ -805,7 +835,11 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
           lng,
           photo_url: photoUrl,
           confidence: confidenceValue,
-          rarity: VALID_RARITIES[Math.floor(Math.random() * VALID_RARITIES.length)],
+          rarity_observations_count: rarityObservationsCount,
+          rarity_conservation_status: rarity ? (status.conservationStatus?.status ?? null) : null,
+          rarity_conservation_iucn: rarity ? (status.conservationStatus?.iucn ?? null) : null,
+          rarity_score: rarity?.score ?? null,
+          rarity_band: rarity?.band ?? null,
         })
         .select()
         .single()
@@ -885,7 +919,14 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
       location: { lat, lng },
       photoUrl,
       confidence: confidenceValue,
-      rarity: row?.rarity ?? priorHere?.rarity ?? null,
+      // A repeat catch reuses the score computed the first time this catalogue
+      // entry was created — see the comment above the (!priorHere) block.
+      // rarityGachaTier is derived here, not stored: PlantCard.jsx's N/R/SR/
+      // SSR/UR scale is one presentation of rarityScore, kept out of the
+      // schema so re-tuning either scale's cutoffs never needs a backfill.
+      rarityScore: row?.rarity_score ?? priorHere?.rarity_score ?? null,
+      rarityBand: row?.rarity_band ?? priorHere?.rarity_band ?? null,
+      rarityGachaTier: gachaTierFor(row?.rarity_score ?? priorHere?.rarity_score ?? null),
       isFirstCatch,
       // False for an exact repeat: this submission scored, but did not add a
       // card to the catalogue. True for a first-ever catch and for the same
@@ -963,7 +1004,7 @@ router.get('/catches', async (req, res, next) => {
       // person, and no caller needs it back.
       .select(
         'id, taxon_id, scientific_name, common_name, type, lat, lng, ' +
-          'place_id, place_name, photo_url, rarity, created_at',
+          'place_id, place_name, photo_url, rarity_score, rarity_band, created_at',
       )
 
     if (userId) query = query.eq('user_id', userId)
@@ -1004,7 +1045,9 @@ router.get('/supabase/all', async (req, res, next) => {
       await Promise.all([
         sb.from('catches')
           .select(
-            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, rarity, confidence, created_at',
+            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, ' +
+              'rarity_observations_count, rarity_conservation_status, rarity_conservation_iucn, rarity_score, rarity_band, ' +
+              'confidence, created_at',
           )
           .order('created_at', { ascending: false })
           .limit(SCAN_LIMIT),
