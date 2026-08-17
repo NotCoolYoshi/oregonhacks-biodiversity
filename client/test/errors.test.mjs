@@ -124,6 +124,14 @@ check('a flower photo is not told to photograph the flower',
 
 console.log('\n-- catch submission failures --')
 
+const duplicate = describeSubmitError(
+  axiosError(409, { code: 'DUPLICATE_CATCH', error: 'You have already logged Rubus armeniacus in Oregon.' }),
+)
+check('a duplicate is named as such', duplicate.title === 'Already in your catalogue', duplicate.title)
+check('a duplicate does not offer a pointless retry', duplicate.canRetry === false)
+check("a duplicate shows the server's explanation",
+  /already logged/i.test(duplicate.guidance), duplicate.guidance)
+
 check('an unconfigured database is distinguished from a rejected catch',
   describeSubmitError(axiosError(503, { code: 'DB_NOT_CONFIGURED' })).title !==
     describeSubmitError(axiosError(500, {})).title)
@@ -132,6 +140,22 @@ check('an unknown taxon is distinguished too',
     describeSubmitError(axiosError(500, {})).title)
 check('an unrecognised submit failure still offers a retry',
   describeSubmitError(axiosError(500, {})).canRetry === true)
+
+console.log('\n-- auth failures on submit --')
+
+const unauthenticated = describeSubmitError(axiosError(401, { code: 'UNAUTHENTICATED', error: 'Sign in required.' }))
+check('an unauthenticated submit is named as such',
+  unauthenticated.title === 'Sign in to log this catch', unauthenticated.title)
+check('an unauthenticated submit does not offer a pointless retry',
+  unauthenticated.canRetry === false)
+check('an unauthenticated submit tells the user to sign in',
+  /sign in/i.test(unauthenticated.guidance), unauthenticated.guidance)
+
+const authNotConfigured = describeSubmitError(axiosError(503, { code: 'AUTH_NOT_CONFIGURED' }))
+check('a missing Clerk config is distinguished from "not signed in"',
+  authNotConfigured.title !== unauthenticated.title, authNotConfigured.title)
+check('a missing Clerk config does not blame the photo',
+  /nothing is wrong with your photo/i.test(authNotConfigured.guidance), authNotConfigured.guidance)
 
 console.log(`\n${pass} passed, ${fail} failed\n`)
 process.exit(fail === 0 ? 0 : 1)

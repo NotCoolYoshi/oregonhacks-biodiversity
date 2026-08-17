@@ -8,9 +8,10 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node test/errors.test.mjs && node test/taxonCategory.test.mjs"
+    "test": "node test/errors.test.mjs && node test/taxonCategory.test.mjs && node test/session.test.mjs"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.9",
     "axios": "^1.19.0",
     "leaflet": "^1.9.4",
     "leaflet.heat": "^0.2.0",

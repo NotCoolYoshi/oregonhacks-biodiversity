@@ -16,6 +16,7 @@ import {
 } from '../services/inaturalist.js'
 import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.js'
 import { uploadCatchPhoto, PhotoStorageError } from '../services/photoStorage.js'
+import { requireClerkUser } from '../middleware/clerkAuth.js'
 
 const router = Router()
 
@@ -657,9 +658,16 @@ router.get('/observations/nearby', async (req, res, next) => {
 
 /**
  * POST /api/catches
- * Body: { userId, taxonId, scientificName, commonName, family, type, location: { lat, lng },
+ * Auth required: Authorization: Bearer <Clerk session JWT>.
+ * Body: { taxonId, scientificName, commonName, family, type, location: { lat, lng },
  *         placeId, photoUrl, confidence }
  * Records a capture or a threat report.
+ *
+ * `userId` is Clerk's, from requireClerkUser() — not the body. Same reasoning
+ * as `type` below: a client that could name its own identity could write
+ * catches into someone else's catalogue. Any `userId` the body still carries
+ * (older clients, or the pre-auth localStorage id — see client/src/session.js)
+ * is ignored.
  *
  * `location` decides the place, and through it the native/invasive verdict —
  * see resolvePlaceForRequest(). `placeId` is accepted but no longer expected
@@ -677,16 +685,13 @@ router.get('/observations/nearby', async (req, res, next) => {
  * scored at a lower tier instead of being rejected — see the Scoring section
  * above and `newCatalogueEntry`/`tier`/`pointsAwarded` on the response below.
  */
-router.post('/catches', async (req, res, next) => {
+router.post('/catches', requireClerkUser, async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   const body = req.body ?? {}
-  const userId = String(body.userId ?? '').trim()
+  const userId = req.clerkUserId
   const location = body.location ?? {}
 
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
-  }
   if (!body.taxonId && !body.scientificName) {
     return res
       .status(400)
@@ -982,32 +987,29 @@ router.get('/catches', async (req, res, next) => {
 
 /**
  * POST /api/users
- * Body: { userId, displayName? }
+ * Auth required: Authorization: Bearer <Clerk session JWT>.
+ * Body: { displayName? }
  * Creates the user's row, or renames an existing one. Idempotent.
  *
- * There are no accounts: `userId` is the string the browser generated and kept
- * in localStorage (see client/src/session.js), and this route takes it on
- * trust exactly as POST /catches does. All this table adds is a name to put
- * next to it.
+ * `userId` is Clerk's, from requireClerkUser() — not the body. Previously this
+ * was the string the browser generated and kept in localStorage (see
+ * client/src/session.js), taken on trust; that trust boundary is what this
+ * middleware replaces. Any `userId` the body still carries is ignored.
  *
  * Two callers, one route:
- *   { userId }                  first load — establish a row, keep any name it
+ *   {}                          first load — establish a row, keep any name it
  *                               already has, generate one if it has none.
- *   { userId, displayName }     the rename action — overwrite it.
+ *   { displayName }             the rename action — overwrite it.
  *
  * A blank or whitespace-only displayName counts as "not supplied" rather than
  * an instruction to erase the name; a user who clears the rename field and
  * submits gets to keep what they had.
  */
-router.post('/users', async (req, res, next) => {
+router.post('/users', requireClerkUser, async (req, res, next) => {
   if (!requireDatabase(res)) return
 
   const body = req.body ?? {}
-  const userId = String(body.userId ?? '').trim()
-
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required', code: 'BAD_REQUEST' })
-  }
+  const userId = req.clerkUserId
 
   const requestedName = String(body.displayName ?? '').trim()
   const hasDisplayName = requestedName !== ''

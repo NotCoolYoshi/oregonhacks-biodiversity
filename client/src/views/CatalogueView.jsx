@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { getCatches, getUserAchievements } from '../api'
 import { groupBySpecies } from '../catalogue'
-import { getUserId } from '../session'
+import { useCurrentUserId } from '../session'
 import SpeciesDetail from './SpeciesDetail'
 
 // TODO: the "catchable nearby" list from GET /api/region/:placeId/nearby, to
@@ -134,9 +134,18 @@ export default function CatalogueView() {
   const [error, setError] = useState(null)
   const [openTaxonId, setOpenTaxonId] = useState(null)
 
+  // Reactive, not a one-time read: see useCurrentUserId() in session.js.
+  // Without it, a hard refresh on this page while Clerk is still restoring
+  // the session would fetch (and then permanently show) the anonymous id's
+  // empty catalogue instead of the signed-in user's.
+  const userId = useCurrentUserId()
+
   useEffect(() => {
     let cancelled = false
-    const userId = getUserId()
+    // Re-enter the loading state on an id change (sign-in resolving after
+    // mount, not just the first run) rather than flashing the previous
+    // identity's rows while the new fetch is in flight.
+    setLoading(true)
 
     Promise.all([
       getCatches({ userId }),
@@ -168,7 +177,7 @@ export default function CatalogueView() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [userId])
 
   const closeDetail = useCallback(() => setOpenTaxonId(null), [])
 

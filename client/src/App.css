@@ -96,9 +96,26 @@
   text-align: left;
 }
 
+.header {
+  position: relative;
+}
+
 .header h1 {
   margin: 0 0 0.75rem;
   font-size: 1.5rem;
+}
+
+.auth-status {
+  position: absolute;
+  top: 0;
+  right: 0;
+}
+
+.auth-sign-in-link {
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--color-accent, inherit);
 }
 
 /* ---------------------------------------------------------------------------

@@ -2,8 +2,44 @@ import axios from 'axios'
 
 // Points at the Express proxy layer, never at Pl@ntNet/iNaturalist directly —
 // API keys live on the server only.
+//
+// import.meta.env?. (not .env.), because this module is also reachable from
+// plain `node test/session.test.mjs` via session.js's default import of
+// getCurrentUser/updateDisplayName (see session.js) — import.meta.env only
+// exists under Vite, so a bare .env would throw the moment this file loads
+// outside it, before a test ever gets to exercise the DI that's meant to
+// avoid calling these for real.
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? 'http://localhost:5001',
+  baseURL: import.meta.env?.VITE_API_URL ?? 'http://localhost:5001',
+})
+
+/**
+ * The current Clerk session token, or null if there is no signed-in session.
+ *
+ * Reads `window.Clerk` rather than a React hook — this module has no
+ * component tree to hook into, and ClerkProvider (see src/ClerkApp.jsx)
+ * attaches itself to `window.Clerk` on mount regardless. Every failure mode
+ * here (no ClerkProvider mounted, Clerk still loading, no signed-in session)
+ * degrades to null rather than throwing: most requests this interceptor runs
+ * on are read routes that never look at the header at all.
+ */
+async function getAuthToken() {
+  try {
+    return (await window.Clerk?.session?.getToken()) ?? null
+  } catch {
+    return null
+  }
+}
+
+// Attaches the signed-in user's session token to every request. Only
+// POST /api/catches and POST /api/users check it (see requireClerkUser in
+// server/src/middleware/clerkAuth.js) — everywhere else it is sent and
+// ignored, which is simpler than threading "does this call need auth?"
+// through every call site in this file.
+api.interceptors.request.use(async (config) => {
+  const token = await getAuthToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
 })
 
 /** POST /api/identify — { imageBase64 } -> candidate species matches. */
