@@ -18,6 +18,9 @@ import { getSupabase, isConfigured as hasDatabase } from '../db/supabaseClient.j
 import { uploadCatchPhoto, PhotoStorageError } from '../services/photoStorage.js'
 import { requireClerkUser } from '../middleware/clerkAuth.js'
 
+// Rarity options for catches
+const VALID_RARITIES = ['N', 'R', 'SR', 'SSR', 'UR']
+
 const router = Router()
 
 /**
@@ -802,6 +805,7 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
           lng,
           photo_url: photoUrl,
           confidence: confidenceValue,
+          rarity: VALID_RARITIES[Math.floor(Math.random() * VALID_RARITIES.length)],
         })
         .select()
         .single()
@@ -881,6 +885,7 @@ router.post('/catches', requireClerkUser, async (req, res, next) => {
       location: { lat, lng },
       photoUrl,
       confidence: confidenceValue,
+      rarity: row?.rarity ?? priorHere?.rarity ?? null,
       isFirstCatch,
       // False for an exact repeat: this submission scored, but did not add a
       // card to the catalogue. True for a first-ever catch and for the same
@@ -958,7 +963,7 @@ router.get('/catches', async (req, res, next) => {
       // person, and no caller needs it back.
       .select(
         'id, taxon_id, scientific_name, common_name, type, lat, lng, ' +
-          'place_id, place_name, photo_url, created_at',
+          'place_id, place_name, photo_url, rarity, created_at',
       )
 
     if (userId) query = query.eq('user_id', userId)
@@ -999,7 +1004,7 @@ router.get('/supabase/all', async (req, res, next) => {
       await Promise.all([
         sb.from('catches')
           .select(
-            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, confidence, created_at',
+            'id, user_id, taxon_id, scientific_name, common_name, family, type, lat, lng, place_id, place_name, photo_url, rarity, confidence, created_at',
           )
           .order('created_at', { ascending: false })
           .limit(SCAN_LIMIT),
