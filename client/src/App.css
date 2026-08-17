@@ -1844,7 +1844,7 @@
 
   padding: 1rem 1.25rem;
 
-
+  /* */
 }
 
 
@@ -1880,4 +1880,17 @@
 
 .gallery-nav-button:active {
   transform: translateY(0);
+}
+
+
+/* Phone */
+@media (max-width: 26rem) {
+  .catalogue-top {
+    padding: 0.85rem 1rem;
+  }
+
+  .gallery-nav-button {
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+  }
 }
