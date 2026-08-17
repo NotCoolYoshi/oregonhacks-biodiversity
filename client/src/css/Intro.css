@@ -9,7 +9,7 @@
   align-items: center;
   justify-content: center;
   background: var(--bg);
-  animation: intro-exit var(--intro-duration, 1500ms) ease forwards;
+  animation: intro-exit var(--intro-duration, 800ms) ease forwards;
 }
 
 .intro__content {
@@ -17,7 +17,7 @@
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  animation: intro-content-in var(--intro-duration, 1500ms) ease forwards;
+  animation: intro-content-in var(--intro-duration, 800ms) ease forwards;
 }
 
 .intro__icon {
@@ -35,11 +35,13 @@
 /* Held fully visible until the last third of the timeline, then fades and
    scales out so the gallery underneath never gets an abrupt reveal. */
 @keyframes intro-exit {
+
   0%,
   66% {
     opacity: 1;
     transform: scale(1);
   }
+
   100% {
     opacity: 0;
     transform: scale(1.04);
@@ -52,6 +54,7 @@
     opacity: 0;
     transform: scale(0.92) translateY(6px);
   }
+
   20%,
   100% {
     opacity: 1;
@@ -62,17 +65,20 @@
 @media (prefers-reduced-motion: reduce) {
   .intro {
     animation: intro-exit-reduced 200ms linear forwards;
-    animation-delay: calc(var(--intro-duration, 1500ms) - 200ms);
+    animation-delay: calc(var(--intro-duration, 800ms) - 200ms);
   }
+
   .intro__content {
     animation: none;
     opacity: 1;
     transform: none;
   }
+
   @keyframes intro-exit-reduced {
     from {
       opacity: 1;
     }
+
     to {
       opacity: 0;
     }

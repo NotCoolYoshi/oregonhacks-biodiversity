@@ -10,7 +10,8 @@
   position: fixed;
   inset: 0;
   z-index: 0;
-  pointer-events: none; /* Never intercepts a tap meant for the map or a card. */
+  pointer-events: none;
+  /* Never intercepts a tap meant for the map or a card. */
   overflow: hidden;
 }
 
@@ -83,7 +84,8 @@
 
 .app {
   position: relative;
-  z-index: 1; /* Above the forest backdrop, which is z-index 0 inside #root. */
+  z-index: 1;
+  /* Above the forest backdrop, which is z-index 0 inside #root. */
   /* #root is a column flex container, and an auto cross-axis margin cancels
      the default `align-items: stretch`. Without this the box shrink-wraps its
      content to ~305px and max-width never comes into play — every view renders
@@ -144,7 +146,8 @@
   left: 50%;
   bottom: calc(0.9rem + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
-  z-index: 500; /* Leaflet's own panes top out at 400. */
+  z-index: 500;
+  /* Leaflet's own panes top out at 400. */
   width: min(30rem, calc(100% - 1.6rem));
   border: 1px solid color-mix(in srgb, #000 20%, var(--color-deep-green));
   border-radius: 999px;
@@ -268,6 +271,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .nav-tab,
   .nav-icon {
     transition: none;
@@ -821,9 +825,12 @@
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.5;
   }
@@ -1526,6 +1533,7 @@
 /* Without a flip, the two faces would sit on top of each other with no way to
    tell which is showing. Cross-fade in place instead. */
 @media (prefers-reduced-motion: reduce) {
+
   .species-card-inner,
   .species-card:hover .species-card-inner,
   .species-card:focus-visible .species-card-inner {
@@ -1820,8 +1828,56 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .milestone-fill,
   .milestone-icon {
     transition: none;
   }
+}
+
+.catalogue-top {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+
+  padding: 1rem 1.25rem;
+
+
+}
+
+
+/* Green Gallery button */
+.gallery-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0.65rem 1.15rem;
+
+  background: var(--primary, #5f8f52);
+  color: #fff;
+
+  border: none;
+  border-radius: var(--radius);
+
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.2s ease,
+    filter 0.2s ease;
+}
+
+.gallery-nav-button:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.gallery-nav-button:active {
+  transform: translateY(0);
 }

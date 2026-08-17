@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { getCatches, getUserAchievements } from '../api'
 import { groupBySpecies } from '../catalogue'
@@ -121,23 +122,15 @@ function MilestoneBar({ badge, count }) {
 }
 
 export default function CatalogueView() {
+  const navigate = useNavigate()
+
   const [rows, setRows] = useState([])
-  // Everyone's catches, for the expanded view's "nearby threat reports". Same
-  // endpoint the map reads, unfiltered — no new route for data already served.
   const [allCatches, setAllCatches] = useState([])
-  // Native/invasive badge state from the server — null while loading or if the
-  // request failed. Never computed from `rows`: the server counts distinct
-  // species server-side, and duplicating that here would be a second place to
-  // keep in sync with GET /api/users/:userId/achievements.
   const [achievements, setAchievements] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [openTaxonId, setOpenTaxonId] = useState(null)
 
-  // Reactive, not a one-time read: see useCurrentUserId() in session.js.
-  // Without it, a hard refresh on this page while Clerk is still restoring
-  // the session would fetch (and then permanently show) the anonymous id's
-  // empty catalogue instead of the signed-in user's.
   const userId = useCurrentUserId()
 
   useEffect(() => {
@@ -167,7 +160,7 @@ export default function CatalogueView() {
         if (cancelled) return
         setError(
           err?.response?.data?.error ??
-            'Could not reach the server. If you are running this locally, check it is up on port 5001.',
+          'Could not reach the server. If you are running this locally, check it is up on port 5001.',
         )
       })
       .finally(() => {
@@ -186,92 +179,105 @@ export default function CatalogueView() {
   const ownIds = new Set(rows.map((row) => row.id))
 
   return (
-    <div className="catalogue">
-      <h2>Catalogue</h2>
+    <div className="catalogue-page">
 
-      {loading && <p className="capture-muted">Loading your catalogue…</p>}
-      {!loading && error && <p className="capture-note">{error}</p>}
+      <div className="catalogue-top">
+        <button
+          type="button"
+          className="gallery-nav-button"
+          onClick={() => navigate('/gallery')}
+        >
+          Gallery
+        </button>
+      </div>
 
-      {!loading && !error && species.length === 0 && (
-        <p className="capture-note">
-          Nothing catalogued yet. Photograph a plant from the Capture tab to start.
-        </p>
-      )}
+      <div className="catalogue">
+        <h2>Catalogue</h2>
 
-      {species.length > 0 && (
-        <>
-          <p className="capture-muted">Tap a card to see every sighting.</p>
-          <div className="species-grid">
-            {species.map((s) => (
-              <SpeciesCard
-                key={s.taxon_id}
-                species={s}
-                onOpen={() => setOpenTaxonId(s.taxon_id)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+        {loading && <p className="capture-muted">Loading your catalogue…</p>}
+        {!loading && error && <p className="capture-note">{error}</p>}
 
-      {/* Keyed by species so switching cards remounts rather than reuses —
-          each one fetches its own status, and a stale one showing under a new
-          name is worse than a second spinner. */}
-      {open && (
-        <SpeciesDetail
-          key={open.taxon_id}
-          species={open}
-          allCatches={allCatches}
-          ownIds={ownIds}
-          onClose={closeDetail}
-        />
-      )}
-
-      <section className="catalogue-section">
-        <div className="social-section-head">
-          <h3>Badges collected</h3>
-        </div>
-        {!achievements ? (
-          <p className="capture-muted">
-            {loading ? 'Loading badges…' : 'Could not load badges right now.'}
+        {!loading && !error && species.length === 0 && (
+          <p className="capture-note">
+            Nothing catalogued yet. Photograph a plant from the Capture tab to start.
           </p>
-        ) : (
-          <>
-            <h4 className="milestones-subhead">Native species</h4>
-            <ul className="milestones">
-              {achievements.nativeBadges.map((badge) => (
-                <MilestoneBar
-                  key={badge.threshold}
-                  badge={badge}
-                  count={achievements.nativeSpeciesCount}
-                />
-              ))}
-            </ul>
+        )}
 
-            <h4 className="milestones-subhead">Invasive reports</h4>
-            <ul className="milestones">
-              {achievements.invasiveBadges.map((badge) => (
-                <MilestoneBar
-                  key={badge.threshold}
-                  badge={badge}
-                  count={achievements.invasiveSpeciesCount}
+        {species.length > 0 && (
+          <>
+            <p className="capture-muted">Tap a card to see every sighting.</p>
+            <div className="species-grid">
+              {species.map((s) => (
+                <SpeciesCard
+                  key={s.taxon_id}
+                  species={s}
+                  onOpen={() => setOpenTaxonId(s.taxon_id)}
                 />
               ))}
-            </ul>
+            </div>
           </>
         )}
-      </section>
 
-      {/* TODO: backend not built yet. Quests need their own schema and
-          endpoints — see the matching shell on the Social page. */}
-      <section className="catalogue-section">
-        <h3>Completed quests</h3>
-        <div className="empty-state">
-          <span className="empty-icon" aria-hidden="true">
-            🧭
-          </span>
-          <p>Finished quests will collect here. Not built yet.</p>
-        </div>
-      </section>
+        {/* Keyed by species so switching cards remounts rather than reuses —
+            each one fetches its own status, and a stale one showing under a new
+            name is worse than a second spinner. */}
+        {open && (
+          <SpeciesDetail
+            key={open.taxon_id}
+            species={open}
+            allCatches={allCatches}
+            ownIds={ownIds}
+            onClose={closeDetail}
+          />
+        )}
+
+        <section className="catalogue-section">
+          <div className="social-section-head">
+            <h3>Badges collected</h3>
+          </div>
+          {!achievements ? (
+            <p className="capture-muted">
+              {loading ? 'Loading badges…' : 'Could not load badges right now.'}
+            </p>
+          ) : (
+            <>
+              <h4 className="milestones-subhead">Native species</h4>
+              <ul className="milestones">
+                {achievements.nativeBadges.map((badge) => (
+                  <MilestoneBar
+                    key={badge.threshold}
+                    badge={badge}
+                    count={achievements.nativeSpeciesCount}
+                  />
+                ))}
+              </ul>
+
+              <h4 className="milestones-subhead">Invasive reports</h4>
+              <ul className="milestones">
+                {achievements.invasiveBadges.map((badge) => (
+                  <MilestoneBar
+                    key={badge.threshold}
+                    badge={badge}
+                    count={achievements.invasiveSpeciesCount}
+                  />
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+
+        {/* TODO: backend not built yet. Quests need their own schema and
+            endpoints — see the matching shell on the Social page. */}
+        <section className="catalogue-section">
+          <h3>Completed quests</h3>
+          <div className="empty-state">
+            <span className="empty-icon" aria-hidden="true">
+              🧭
+            </span>
+            <p>Finished quests will collect here. Not built yet.</p>
+          </div>
+        </section>
+      </div>
     </div>
   )
 }
