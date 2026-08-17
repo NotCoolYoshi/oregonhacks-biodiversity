@@ -689,6 +689,35 @@ check('a different species is a first catch again', r.body.isFirstCatch === true
 r = await post({ ...CATCH, userId: 'usr_2', taxonId: 126887 })
 check('first catch is per user, not global', r.body.isFirstCatch === true)
 
+console.log('\n-- family + per-family sequential number --')
+resetTable()
+
+r = await post({ ...CATCH, taxonId: 126887, family: 'Berberidaceae' })
+check('family is persisted', r.body.family === 'Berberidaceae', r.body.family)
+check('...and the row agrees', table[0].family === 'Berberidaceae', table[0].family)
+check('the first catch in a family is sequence 1', r.body.familySequence === 1,
+  r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 61317, family: 'Berberidaceae' })
+check('a second species in the same family advances the sequence',
+  r.body.familySequence === 2, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 48472, family: 'Pinaceae' })
+check('a different family starts its own sequence at 1', r.body.familySequence === 1,
+  r.body.familySequence)
+
+r = await post({ ...CATCH, userId: 'usr_fam2', taxonId: 126887, family: 'Berberidaceae' })
+check('the sequence is per user, not shared across users',
+  r.body.familySequence === 1, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 58732 })
+check('no family sent -> family is null, not omitted', r.body.family === null, r.body.family)
+check('...and familySequence is null, not 0 or omitted',
+  r.body.familySequence === null, r.body.familySequence)
+
+r = await post({ ...CATCH, taxonId: 63603, family: '  Fabaceae  ' })
+check('family is trimmed before storage', r.body.family === 'Fabaceae', r.body.family)
+
 console.log('\n-- duplicate suppression --')
 resetTable()
 
@@ -1116,6 +1145,319 @@ check('a named user with no catches reports zeros',
   g.body.totalPoints === 0 && g.body.catchCount === 0 && g.body.uniqueSpeciesCount === 0,
   JSON.stringify(g.body))
 check('...but still reports their name', g.body.displayName === 'Just Arrived', g.body.displayName)
+
+// ---------------------------------------------------------------------------
+// GET /api/users/:userId/achievements — native and invasive badge state.
+// ---------------------------------------------------------------------------
+
+const getAchievements = async (userId) => {
+  const res = await realFetch(`${base}/api/users/${encodeURIComponent(userId)}/achievements`)
+  return { status: res.status, body: await res.json() }
+}
+
+// This route never looks a taxon up against iNaturalist — it only reads
+// taxon_id and type back out of `catches` — so a synthetic id not present in
+// TAXA is fine, unlike seed()/seedRow() above which both dereference TAXA.
+const seedAchievementRow = (user_id, taxon_id, type, place_id = 10) =>
+  table.push({
+    id: `row_${nextId++}`,
+    user_id,
+    taxon_id,
+    type,
+    place_id,
+    common_name: `Species ${taxon_id}`,
+    scientific_name: `Species ${taxon_id}`,
+    created_at: new Date().toISOString(),
+  })
+
+console.log('\n-- achievements: no catches --')
+resetTable()
+
+let a = await getAchievements('usr_nobody')
+check('unknown user -> 200, not 404', a.status === 200, a.status)
+check('nativeSpeciesCount is 0', a.body.nativeSpeciesCount === 0, a.body.nativeSpeciesCount)
+check('invasiveSpeciesCount is 0', a.body.invasiveSpeciesCount === 0, a.body.invasiveSpeciesCount)
+check('all 7 native badges present', a.body.nativeBadges.length === 7, a.body.nativeBadges.length)
+check('all 4 invasive badges present', a.body.invasiveBadges.length === 4,
+  a.body.invasiveBadges.length)
+check('every native badge starts locked', a.body.nativeBadges.every((b) => b.unlocked === false))
+check('every invasive badge starts locked',
+  a.body.invasiveBadges.every((b) => b.unlocked === false))
+check('native thresholds match the real scheme',
+  JSON.stringify(a.body.nativeBadges.map((b) => b.threshold)) ===
+    JSON.stringify([1, 5, 10, 25, 50, 75, 100]),
+  JSON.stringify(a.body.nativeBadges.map((b) => b.threshold)))
+check('invasive thresholds match the real scheme',
+  JSON.stringify(a.body.invasiveBadges.map((b) => b.threshold)) === JSON.stringify([1, 5, 10, 25]),
+  JSON.stringify(a.body.invasiveBadges.map((b) => b.threshold)))
+check('badge labels match the named scheme',
+  a.body.nativeBadges[0].label === 'First Seed' &&
+    a.body.nativeBadges[6].label === 'Keeper of the Garden' &&
+    a.body.invasiveBadges[0].label === 'First Watch' &&
+    a.body.invasiveBadges[3].label === 'Guardian of the Grove',
+  JSON.stringify([a.body.nativeBadges, a.body.invasiveBadges]))
+
+console.log('\n-- achievements: species counted distinctly, not raw catches --')
+resetTable()
+
+// Same species logged in two places is one entry toward the count, matching
+// GET /api/users/:userId's uniqueSpeciesCount.
+seedAchievementRow('usr_dup', 5001, 'catch', 10)
+seedAchievementRow('usr_dup', 5001, 'catch', 962)
+seedAchievementRow('usr_dup', 5002, 'threat_report', 10)
+seedAchievementRow('usr_dup', 5002, 'threat_report', 962)
+
+a = await getAchievements('usr_dup')
+check('duplicate species across places counts once (native)',
+  a.body.nativeSpeciesCount === 1, a.body.nativeSpeciesCount)
+check('duplicate species across places counts once (invasive)',
+  a.body.invasiveSpeciesCount === 1, a.body.invasiveSpeciesCount)
+
+console.log('\n-- achievements: native and invasive counted independently --')
+resetTable()
+
+seedAchievementRow('usr_split', 5010, 'catch')
+seedAchievementRow('usr_split', 5011, 'catch')
+seedAchievementRow('usr_split', 5012, 'catch')
+
+a = await getAchievements('usr_split')
+check('an all-native user has invasiveSpeciesCount 0', a.body.invasiveSpeciesCount === 0,
+  a.body.invasiveSpeciesCount)
+check('...and every invasive badge stays locked',
+  a.body.invasiveBadges.every((b) => b.unlocked === false))
+check('nativeSpeciesCount reflects the 3 species', a.body.nativeSpeciesCount === 3,
+  a.body.nativeSpeciesCount)
+
+console.log('\n-- achievements: native threshold boundaries --')
+resetTable()
+
+for (let i = 0; i < 4; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch')
+a = await getAchievements('usr_boundary')
+check('4 species: First Seed (1) unlocked, Tender Sprout (5) not yet',
+  a.body.nativeBadges[0].unlocked === true && a.body.nativeBadges[1].unlocked === false,
+  JSON.stringify(a.body.nativeBadges))
+
+seedAchievementRow('usr_boundary', 6004, 'catch') // 5th species
+a = await getAchievements('usr_boundary')
+check('exactly 5 species unlocks Tender Sprout', a.body.nativeBadges[1].unlocked === true,
+  JSON.stringify(a.body.nativeBadges))
+check('...but not Budding Grace (threshold 10)', a.body.nativeBadges[2].unlocked === false,
+  JSON.stringify(a.body.nativeBadges))
+
+for (let i = 5; i < 9; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch') // 9 total
+a = await getAchievements('usr_boundary')
+check('9 species: one short of Budding Grace stays locked',
+  a.body.nativeBadges[2].unlocked === false, a.body.nativeSpeciesCount)
+
+seedAchievementRow('usr_boundary', 6009, 'catch') // 10th species
+a = await getAchievements('usr_boundary')
+check('exactly 10 species unlocks Budding Grace', a.body.nativeBadges[2].unlocked === true,
+  a.body.nativeSpeciesCount)
+
+for (let i = 10; i < 100; i++) seedAchievementRow('usr_boundary', 6000 + i, 'catch') // 100 total
+a = await getAchievements('usr_boundary')
+check('exactly 100 species unlocks every native badge',
+  a.body.nativeBadges.every((b) => b.unlocked === true), a.body.nativeSpeciesCount)
+check('nativeSpeciesCount is exactly 100', a.body.nativeSpeciesCount === 100,
+  a.body.nativeSpeciesCount)
+
+console.log('\n-- achievements: invasive threshold boundaries --')
+resetTable()
+
+for (let i = 0; i < 24; i++) seedAchievementRow('usr_threat', 7000 + i, 'threat_report')
+a = await getAchievements('usr_threat')
+check('24 invasive species: Guardian of the Grove (25) still locked',
+  a.body.invasiveBadges[3].unlocked === false, a.body.invasiveSpeciesCount)
+check('...but Warden of the Wild (10) is already unlocked',
+  a.body.invasiveBadges[2].unlocked === true, a.body.invasiveSpeciesCount)
+
+seedAchievementRow('usr_threat', 7024, 'threat_report') // 25th
+a = await getAchievements('usr_threat')
+check('exactly 25 invasive species unlocks Guardian of the Grove',
+  a.body.invasiveBadges[3].unlocked === true, a.body.invasiveSpeciesCount)
+check('every invasive badge is unlocked at 25',
+  a.body.invasiveBadges.every((b) => b.unlocked === true), a.body.invasiveSpeciesCount)
+
+console.log('\n-- achievements: validation --')
+a = await getAchievements('  ')
+check('whitespace-only userId -> 400', a.status === 400, a.status)
+check('...coded BAD_REQUEST', a.body.code === 'BAD_REQUEST', a.body.code)
+
+// ---------------------------------------------------------------------------
+// GET /api/leaderboard — users ranked by total points.
+// ---------------------------------------------------------------------------
+
+const getLeaderboard = async (query = '') => {
+  const res = await realFetch(`${base}/api/leaderboard${query}`)
+  return { status: res.status, body: await res.json() }
+}
+
+console.log('\n-- leaderboard: empty --')
+resetTable()
+
+let lb = await getLeaderboard()
+check('empty leaderboard -> 200', lb.status === 200, lb.status)
+check('totalResults is 0', lb.body.totalResults === 0, lb.body.totalResults)
+check('standings is an empty array',
+  Array.isArray(lb.body.standings) && lb.body.standings.length === 0, JSON.stringify(lb.body.standings))
+check('capped is false', lb.body.capped === false, lb.body.capped)
+check('placeId is null when unfiltered', lb.body.placeId === null, lb.body.placeId)
+check('source reports the database', lb.body.source === 'supabase', lb.body.source)
+
+console.log('\n-- leaderboard: one user, points and species counts --')
+resetTable()
+
+usersTable.push({ user_id: 'usr_lb1', display_name: 'Fern Gully', created_at: '2026-01-01T00:00:00.000Z' })
+seedAchievementRow('usr_lb1', 9001, 'catch')
+seedAchievementRow('usr_lb1', 9002, 'catch')
+seedAchievementRow('usr_lb1', 9003, 'threat_report')
+
+lb = await getLeaderboard()
+check('one standing', lb.body.standings.length === 1, lb.body.standings.length)
+let lbRow = lb.body.standings[0]
+check('displayName comes from the users row', lbRow.displayName === 'Fern Gully', lbRow.displayName)
+check('totalPoints sums POINTS per row (10+10+25)', lbRow.totalPoints === 45, lbRow.totalPoints)
+check('nativeSpeciesCount counts catch-type rows', lbRow.nativeSpeciesCount === 2,
+  lbRow.nativeSpeciesCount)
+check('invasiveSpeciesCount counts threat_report rows', lbRow.invasiveSpeciesCount === 1,
+  lbRow.invasiveSpeciesCount)
+check('uniqueSpeciesCount is native + invasive', lbRow.uniqueSpeciesCount === 3,
+  lbRow.uniqueSpeciesCount)
+check('no internal tie-break field leaks into the response',
+  !('_createdAt' in lbRow), JSON.stringify(lbRow))
+
+console.log('\n-- leaderboard: display name fallback with no users row --')
+resetTable()
+
+const longUserId = 'usr_no_profile_abcdefgh'
+seedAchievementRow(longUserId, 9010, 'catch')
+seedAchievementRow('usr_x', 9011, 'catch') // short enough to need no truncation
+
+lb = await getLeaderboard()
+const longRow = lb.body.standings.find((s) => s.userId === longUserId)
+const shortRow = lb.body.standings.find((s) => s.userId === 'usr_x')
+check('a long userId with no display name is truncated, not left null',
+  longRow.displayName === `${longUserId.slice(0, 12)}…`, longRow.displayName)
+check('a short userId with no display name is not truncated',
+  shortRow.displayName === 'usr_x', shortRow.displayName)
+
+console.log('\n-- leaderboard: multiple users sorted by points descending --')
+resetTable()
+
+seedAchievementRow('usr_low', 9020, 'catch') // 10
+seedAchievementRow('usr_high', 9021, 'threat_report') // 25
+seedAchievementRow('usr_high', 9022, 'catch') // +10 = 35
+seedAchievementRow('usr_mid', 9023, 'catch') // 10
+seedAchievementRow('usr_mid', 9024, 'catch') // +10 = 20
+
+lb = await getLeaderboard()
+check('three standings', lb.body.standings.length === 3, lb.body.standings.length)
+check('ranked highest points first',
+  lb.body.standings.map((s) => s.userId).join(',') === 'usr_high,usr_mid,usr_low',
+  JSON.stringify(lb.body.standings.map((s) => s.userId)))
+check('points are correct per user',
+  lb.body.standings[0].totalPoints === 35 &&
+    lb.body.standings[1].totalPoints === 20 &&
+    lb.body.standings[2].totalPoints === 10,
+  JSON.stringify(lb.body.standings.map((s) => s.totalPoints)))
+
+console.log('\n-- leaderboard: ties broken by earlier account creation --')
+resetTable()
+
+usersTable.push({ user_id: 'usr_tie_late', display_name: 'Late Joiner', created_at: '2026-02-01T00:00:00.000Z' })
+usersTable.push({ user_id: 'usr_tie_early', display_name: 'Early Bird', created_at: '2026-01-01T00:00:00.000Z' })
+seedAchievementRow('usr_tie_late', 9030, 'catch')
+seedAchievementRow('usr_tie_early', 9031, 'catch')
+
+lb = await getLeaderboard()
+check('both are tied at 10 points', lb.body.standings.every((s) => s.totalPoints === 10),
+  JSON.stringify(lb.body.standings))
+check('the earlier-created account ranks first',
+  lb.body.standings[0].userId === 'usr_tie_early',
+  JSON.stringify(lb.body.standings.map((s) => s.userId)))
+
+console.log('\n-- leaderboard: a tie with no users row sorts after one that has an account date --')
+resetTable()
+
+usersTable.push({ user_id: 'usr_tie_named', display_name: 'Has A Row', created_at: '2026-03-01T00:00:00.000Z' })
+seedAchievementRow('usr_tie_named', 9040, 'catch')
+seedAchievementRow('usr_tie_unnamed', 9041, 'catch') // no users row at all
+
+lb = await getLeaderboard()
+check('the user with a users row ranks first in the tie',
+  lb.body.standings[0].userId === 'usr_tie_named',
+  JSON.stringify(lb.body.standings.map((s) => s.userId)))
+
+console.log('\n-- leaderboard: a tie with neither user having a users row falls back to userId --')
+resetTable()
+
+seedAchievementRow('usr_tie_zzz', 9050, 'catch')
+seedAchievementRow('usr_tie_aaa', 9051, 'catch')
+
+lb = await getLeaderboard()
+check('the alphabetically earlier userId wins the final tiebreak',
+  lb.body.standings[0].userId === 'usr_tie_aaa',
+  JSON.stringify(lb.body.standings.map((s) => s.userId)))
+
+console.log('\n-- leaderboard: species counted distinctly, not raw catch rows --')
+resetTable()
+
+seedAchievementRow('usr_dup2', 9060, 'catch', 10)
+seedAchievementRow('usr_dup2', 9060, 'catch', 962) // same species, a different place
+
+lb = await getLeaderboard()
+check('duplicate species across places counts once toward nativeSpeciesCount',
+  lb.body.standings[0].nativeSpeciesCount === 1, lb.body.standings[0].nativeSpeciesCount)
+check('but both rows still count toward points', lb.body.standings[0].totalPoints === 20,
+  lb.body.standings[0].totalPoints)
+
+console.log('\n-- leaderboard: place_id scopes the ranking --')
+resetTable()
+
+seedAchievementRow('usr_here', 9070, 'catch', 10)
+seedAchievementRow('usr_elsewhere', 9071, 'catch', 962)
+
+lb = await getLeaderboard('?place_id=10')
+check('only the matching place is counted', lb.body.standings.length === 1,
+  JSON.stringify(lb.body.standings))
+check('the right user is on it', lb.body.standings[0].userId === 'usr_here',
+  lb.body.standings[0].userId)
+check('placeId is echoed back', lb.body.placeId === 10, lb.body.placeId)
+check('placeName is resolved', lb.body.placeName === 'Oregon, US', lb.body.placeName)
+
+lb = await getLeaderboard()
+check('unfiltered includes both users', lb.body.standings.length === 2, lb.body.standings.length)
+check('unfiltered reports no place', lb.body.placeId === null && lb.body.placeName === null)
+
+console.log('\n-- leaderboard: validation --')
+lb = await getLeaderboard('?place_id=not-a-place')
+check('non-numeric place_id -> 400', lb.status === 400, lb.status)
+check('...coded BAD_REQUEST', lb.body.code === 'BAD_REQUEST', lb.body.code)
+lb = await getLeaderboard('?place_id=0')
+check('place_id=0 -> 400', lb.status === 400, lb.status)
+lb = await getLeaderboard('?place_id=')
+check('empty place_id is treated as absent, not invalid', lb.status === 200, lb.status)
+
+console.log('\n-- leaderboard: capped at the limit, not paginated --')
+resetTable()
+
+for (let i = 0; i < 55; i++) {
+  seedAchievementRow(`usr_cap_${String(i).padStart(3, '0')}`, 9100 + i, 'catch')
+}
+
+lb = await getLeaderboard()
+check('totalResults counts every contributor, not just the page shown',
+  lb.body.totalResults === 55, lb.body.totalResults)
+check('standings is capped at the default limit', lb.body.standings.length === 50,
+  lb.body.standings.length)
+check('capped is reported true', lb.body.capped === true, lb.body.capped)
+
+lb = await getLeaderboard('?limit=5')
+check('a smaller explicit limit is honored', lb.body.standings.length === 5, lb.body.standings.length)
+
+lb = await getLeaderboard('?limit=9999')
+check('a limit above the ceiling is clamped, not honored',
+  lb.body.standings.length === 50, lb.body.standings.length)
 
 console.log(`\n${pass} passed, ${fail} failed\n`)
 server.close()
