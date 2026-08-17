@@ -129,6 +129,14 @@ export default function UserProfile() {
           : undefined
       }
     >
+      {/* Its own layer, not folded into the backgroundImage gradient above:
+          that inline gradient is a flat, uniform tint over the whole photo,
+          while this one only needs to be strong under the text — see
+          .profile-scrim in App.css for why it's a separate element (z-index,
+          not stacked into the same background-image) rather than another
+          gradient stop there. */}
+      <div className="profile-scrim" aria-hidden="true" />
+
       <img
         className={`avatar${loading ? ' avatar--skeleton' : ''}`}
         src={avatarSrc}
