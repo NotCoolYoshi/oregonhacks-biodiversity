@@ -12,6 +12,7 @@
     "start": "node src/index.js",
     "setup:storage": "node scripts/setup-storage.mjs",
     "backfill:places": "node scripts/backfill-places.mjs",
+    "backfill:rarity": "node scripts/backfill-rarity.mjs",
     "test": "node test/plantnet.test.mjs && node test/routes.test.mjs && node test/backfill.test.mjs"
   },
   "dependencies": {

@@ -656,8 +656,12 @@
   gap: 0.7rem;
   padding: 1.2rem;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  /* Two layers: a top-edge "sheen" (bright at the top, gone by 40% down) is
+     what actually reads as glass — plain blur+tint alone was too subtle
+     against Home's low-contrast background to register as a surface at all. */
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 40%),
+    rgba(255, 255, 255, 0.24);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(19, 33, 27, 0.12);
   backdrop-filter: blur(12px) saturate(1.15);
   -webkit-backdrop-filter: blur(12px) saturate(1.15);
@@ -677,8 +681,9 @@
    stuck in a "hovered" look until the next unrelated tap elsewhere. */
 @media (hover: hover) and (pointer: fine) {
   .action-card:hover {
-    border-color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.58);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 40%),
+      rgba(255, 255, 255, 0.32);
     transform: translateY(-2px);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 14px 28px rgba(19, 33, 27, 0.18);
   }
@@ -688,8 +693,9 @@
    shift on press, independent of hover. Requires the onTouchStart no-op in
    HomeView.jsx — see the comment there — or iOS Safari never applies this. */
 .action-card:active {
-  border-color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.68);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 40%),
+    rgba(255, 255, 255, 0.4);
   transform: scale(0.96);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 4px 10px rgba(19, 33, 27, 0.16);
   transition-duration: 0.08s;
@@ -729,8 +735,12 @@
 
 .eco-facts {
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  /* Same sheen + fill/border strengthening as .action-card, so the eco-facts
+     panel reads as part of the same glass system rather than looking like a
+     leftover flat card next to the restyled ones. */
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 40%),
+    rgba(255, 255, 255, 0.24);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(19, 33, 27, 0.12);
   backdrop-filter: blur(12px) saturate(1.15);
   -webkit-backdrop-filter: blur(12px) saturate(1.15);
@@ -762,8 +772,9 @@
 
 .eco-facts-next {
   flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 40%),
+    rgba(255, 255, 255, 0.26);
   color: var(--text-h);
   font: inherit;
   font-size: 0.78rem;
@@ -778,12 +789,14 @@
 
 @media (hover: hover) and (pointer: fine) {
   .eco-facts-next:hover {
-    background: rgba(255, 255, 255, 0.28);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0) 40%),
+      rgba(255, 255, 255, 0.36);
   }
 }
 
 .eco-facts-next:active {
-  background: rgba(255, 255, 255, 0.34);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 40%),
+    rgba(255, 255, 255, 0.44);
   transform: scale(0.94);
   transition-duration: 0.08s;
 }
@@ -802,10 +815,37 @@
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  /* z-index: 0 (not just position: relative) gives .profile-scrim's negative
+     z-index below its own stacking context to sink into, the same trick used
+     on .app — otherwise -1 would bubble up and risk sinking behind whatever
+     ancestor stacking context happens to own it instead. */
+  position: relative;
+  z-index: 0;
 }
 
 .user-profile--loading {
   opacity: 0.5;
+}
+
+/* A second, independent layer between the background photo (set inline in
+   UserProfile.jsx) and the avatar/text content — not baked into that same
+   background-image, so it can never end up over the avatar photo itself, and
+   never needs a blur that would touch the photo. Darkest on the left, under
+   the name/subtitle, fading to transparent before the photo's own visible
+   area on the right; the flat inline overlay alone (~22%, uniform) was not
+   enough to keep --text-h/--text legible against a bright or busy photo. */
+.profile-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    rgba(15, 43, 29, 0.65) 0%,
+    rgba(15, 43, 29, 0.6) 35%,
+    rgba(15, 43, 29, 0.24) 58%,
+    rgba(15, 43, 29, 0) 78%
+  );
 }
 
 /* Flat pale blue with a deep-green rim — the brief's flat-shape direction, and
@@ -846,6 +886,12 @@
   font-weight: 500;
   color: var(--text-h);
   font-size: 1rem;
+  /* --text-h is a dark colour, tuned for the light surfaces used everywhere
+     else — over a photo it needs its own contrast trick, not more darkness.
+     A soft white glow rings each glyph so it stays readable against both the
+     photo's bright patches and (now that .profile-scrim exists) its dark
+     ones, as backup to the scrim rather than a replacement for it. */
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.85), 0 1px 2px rgba(255, 255, 255, 0.5);
 }
 
 /* The name is a button so it is reachable by keyboard and announced as
@@ -861,6 +907,7 @@
   font-size: 1rem;
   text-align: left;
   cursor: pointer;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.85), 0 1px 2px rgba(255, 255, 255, 0.5);
 }
 
 .profile-text .name-button:hover {
@@ -888,6 +935,7 @@
 .profile-text .owned {
   font-size: 0.85rem;
   color: var(--text);
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.85), 0 1px 2px rgba(255, 255, 255, 0.5);
 }
 
 .profile-text .skeleton {

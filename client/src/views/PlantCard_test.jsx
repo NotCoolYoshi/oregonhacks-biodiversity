@@ -9,7 +9,7 @@ function toPlantCardProps(catchRow) {
     name: catchRow.common_name || catchRow.scientific_name || 'Unknown',
     uniqueId: catchRow.id ?? catchRow.taxon_id ?? '—',
     photoUrl: catchRow.photo_url ?? null,
-    rarity: catchRow.rarity ?? 'N',
+    rarityScore: catchRow.rarity_score ?? null,
   }
 }
 
@@ -49,7 +49,7 @@ export default function PlantCardTest() {
         <div key={plant.uniqueId}>
           <PlantCard plant={plant} />
           <p style={{ textAlign: 'center', marginTop: '1rem', fontWeight: 'bold' }}>
-            {/* Rarity: {plant.rarity} */}
+            {/* Rarity score: {plant.rarityScore} */}
           </p>
         </div>
       ))}

@@ -1,9 +1,24 @@
 -- ============================================================================
--- Migration 006 — a rarity column on catches.
+-- Migration 006 — SUPERSEDED. Do not run.
 --
--- RUN THIS BY HAND IN THE SUPABASE SQL EDITOR:
---   Supabase dashboard -> your project -> SQL Editor -> New query
---   -> paste this whole file -> Run
+-- This originally added a bare `rarity text` column, filled by the app with
+-- Math.random() over ['N','R','SR','SSR','UR'] — noise, not a real signal.
+-- Investigation (docs/rarity-scoring-plan-20260817.md) found this column was
+-- never actually applied to the live project despite schema.sql and the app
+-- code both assuming it existed — `GET /catches` and `POST /catches` were
+-- (or, depending on deploy timing, were about to start) failing with
+-- `42703: column catches.rarity does not exist` for every request that
+-- touched it. See that doc's §0 for how this was confirmed.
+--
+-- Replaced outright by migration 007, which adds real, computed rarity
+-- columns instead. `schema.sql`'s own `rarity text` line (a retroactive edit
+-- made in the same commit as this file, breaking the "schema.sql is never
+-- edited after initial setup" convention every other migration here follows)
+-- has also been removed.
+--
+-- Left in place, emptied, rather than deleted outright — deleting a numbered
+-- migration file would leave a silent gap in "run every file in order" with
+-- no explanation for why 006 is missing. If you are setting up a fresh
+-- project by running every file in this directory in order: this one is
+-- intentionally a no-op, nothing to run here.
 -- ============================================================================
-
-alter table public.catches add column if not exists rarity text;

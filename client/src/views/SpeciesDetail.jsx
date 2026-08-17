@@ -197,14 +197,19 @@ function SightingCard({ sighting, livePlace }) {
 /**
  * Conservation status.
  *
- * Two different things, deliberately not blended. iNaturalist's
- * `conservationStatus` is a real assessment by a real authority (IUCN and
- * friends) and is shown as such when it exists. The rare/common banding this
- * app's badge system would need is a separate thing that has never been
- * calibrated — there are no thresholds anywhere in the codebase to reuse — so
- * it says so instead of inventing a scale that would read as authoritative.
+ * Two different things, deliberately not blended into one number here.
+ * iNaturalist's `conservationStatus` is a real assessment by a real authority
+ * (IUCN and friends) and is shown as-is when one exists. The rarity band is a
+ * separate, computed fact — place-scoped observation count, blended with that
+ * same conservation assessment when one exists — stored on the catch row at
+ * capture time (see server/src/services/rarity.js), not re-derived here.
+ *
+ * `rarityBand`/`rarityScore` come from the anchor sighting (the same one the
+ * verdict above is about — see the anchoring comment near where this
+ * component is called), not from a fresh fetch: rarity is computed once, at
+ * capture time, on purpose — see docs/rarity-scoring-plan-20260817.md §3.
  */
-function ConservationStatus({ status, loading }) {
+function ConservationStatus({ status, loading, rarityBand, rarityScore }) {
   if (loading) return <p className="capture-muted">Checking conservation status…</p>
 
   const assessed = status?.conservationStatus
@@ -222,11 +227,20 @@ function ConservationStatus({ status, loading }) {
         </p>
       )}
 
-      <p className="capture-muted">
-        <span className="badge-placeholder">Not calibrated</span> Rare / common banding needs
-        thresholds this app has never set. Showing a made-up scale here would read as
-        authoritative, so it is left out until the badge system defines one.
-      </p>
+      {rarityBand ? (
+        <p className="capture-muted">
+          <span className="badge-placeholder">{rarityBand}</span> Provisional — based on how
+          often this species has been recorded on iNaturalist near where you found it
+          {assessed?.statusName ? ', blended with the conservation assessment above' : ''}
+          {typeof rarityScore === 'number' ? ` (score ${rarityScore.toFixed(2)} of 1)` : ''}.
+          These cutoffs haven't been checked against much real data yet and may move.
+        </p>
+      ) : (
+        <p className="capture-muted">
+          <span className="badge-placeholder">Not yet scored</span> This sighting was logged
+          before rarity scoring existed and hasn't been backfilled.
+        </p>
+      )}
     </>
   )
 }
@@ -452,7 +466,16 @@ export default function SpeciesDetail({ species, allCatches, ownIds, onClose }) 
 
         <section className="species-detail-section">
           <h3>Conservation status</h3>
-          <ConservationStatus status={status} loading={loadingStatus} />
+          <ConservationStatus
+            status={status}
+            loading={loadingStatus}
+            // Same anchor sighting the verdict above is about — falls back to
+            // the species' own most-recent row (groupBySpecies spreads it in)
+            // for a species whose anchor sighting predates rarity scoring but
+            // whose card face still has a scored row somewhere.
+            rarityBand={anchor?.rarity_band ?? species.rarity_band ?? null}
+            rarityScore={anchor?.rarity_score ?? species.rarity_score ?? null}
+          />
         </section>
 
         <section className="species-detail-section">
